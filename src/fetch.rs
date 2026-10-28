@@ -5,6 +5,7 @@ use chrono::{Local, NaiveDate, TimeDelta};
 
 use crate::config::{Config, Workspace};
 use crate::credentials::Credentials;
+use crate::notify;
 use crate::slack::{Client, Message};
 use crate::state::{Cache, Item, Seen, Store};
 
@@ -54,6 +55,7 @@ pub fn run() -> Result<()> {
             .count();
         println!("{name}: {total} 件、新着 {new} 件");
     }
+    notify::notify(&new_items, &users);
 
     store.save_seen(&seen)?;
     store.save_cache(&Cache {

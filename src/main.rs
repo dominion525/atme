@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 mod config;
 mod credentials;
 mod fetch;
+mod notify;
 mod slack;
 mod state;
 
