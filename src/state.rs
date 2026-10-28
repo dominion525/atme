@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
-use std::io::ErrorKind;
+use std::fs::{self, DirBuilder, OpenOptions, Permissions};
+use std::io::{ErrorKind, Write};
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -103,9 +104,24 @@ fn read_json<T: DeserializeOwned>(path: &Path) -> Result<Option<T>> {
 
 fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     let dir = path.parent().context("保存先のディレクトリがありません")?;
-    fs::create_dir_all(dir).with_context(|| format!("{} を作れませんでした", dir.display()))?;
+    DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(dir)
+        .with_context(|| format!("{} を作れませんでした", dir.display()))?;
+    fs::set_permissions(dir, Permissions::from_mode(0o700))
+        .with_context(|| format!("{} の権限を設定できませんでした", dir.display()))?;
     let tmp = path.with_extension("json.tmp");
-    fs::write(&tmp, serde_json::to_vec_pretty(value)?)
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(&tmp)
+        .with_context(|| format!("{} を開けませんでした", tmp.display()))?;
+    file.set_permissions(Permissions::from_mode(0o600))
+        .with_context(|| format!("{} の権限を設定できませんでした", tmp.display()))?;
+    file.write_all(&serde_json::to_vec_pretty(value)?)
         .with_context(|| format!("{} に書けませんでした", tmp.display()))?;
     fs::rename(&tmp, path).with_context(|| format!("{} に置き換えられませんでした", path.display()))
 }
@@ -141,5 +157,18 @@ mod tests {
 
         assert_eq!(store.load_seen().unwrap(), Some(seen));
         assert!(!store.dir.join("seen.json.tmp").exists());
+    }
+
+    #[test]
+    fn files_are_owner_only() {
+        let store = temp_store("permissions");
+        fs::create_dir_all(&store.dir).unwrap();
+        fs::set_permissions(&store.dir, Permissions::from_mode(0o755)).unwrap();
+
+        store.save_seen(&Seen::new()).unwrap();
+
+        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&store.dir), 0o700);
+        assert_eq!(mode(&store.dir.join("seen.json")), 0o600);
     }
 }
