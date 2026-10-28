@@ -7,7 +7,7 @@ use crate::config::{Config, Workspace};
 use crate::credentials::Credentials;
 use crate::notify;
 use crate::slack::{Client, Message};
-use crate::state::{Cache, Item, Seen, Store};
+use crate::state::{ts_seconds, Cache, Item, Seen, Store};
 
 const SECONDS_PER_DAY: i64 = 86_400;
 
@@ -170,13 +170,6 @@ fn diff(previous: Option<&Seen>, items: &[Item], cutoff: i64) -> (Vec<Item>, See
         .filter(|key| ts_seconds(&key.ts) >= cutoff)
         .collect();
     (new, seen)
-}
-
-fn ts_seconds(ts: &str) -> i64 {
-    ts.split('.')
-        .next()
-        .and_then(|seconds| seconds.parse().ok())
-        .unwrap_or(0)
 }
 
 #[cfg(test)]

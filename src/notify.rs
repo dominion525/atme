@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::io::ErrorKind;
 use std::process::Command;
 
+use crate::display;
 use crate::state::{Item, Users};
 
 const MAX_INDIVIDUAL: usize = 5;
@@ -64,7 +65,7 @@ fn plan(items: &[Item], users: &Users) -> Vec<Notification> {
     notifications.extend(items.iter().take(MAX_INDIVIDUAL).rev().map(|item| {
         let names = users.get(&item.workspace).unwrap_or(&empty);
         Notification {
-            title: format!("{} / {}", item.workspace, channel_label(item)),
+            title: format!("{} / {}", item.workspace, display::channel_label(item)),
             subtitle: item.user_name.clone(),
             message: message(&item.text, names),
             open: Some(item.permalink.clone()),
@@ -73,140 +74,24 @@ fn plan(items: &[Item], users: &Users) -> Vec<Notification> {
     notifications
 }
 
-fn channel_label(item: &Item) -> String {
-    if item.is_im {
-        format!(
-            "DM {}",
-            item.peer_name.as_deref().unwrap_or(&item.channel_name)
-        )
-    } else if item.is_mpim {
-        "グループ DM".into()
-    } else {
-        format!("#{}", item.channel_name)
-    }
-}
-
 fn message(text: &str, names: &BTreeMap<String, String>) -> String {
-    let text = render(text, names)
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-    let mut text = if text.chars().count() > MESSAGE_CHARS {
-        text.chars().take(MESSAGE_CHARS).chain(['…']).collect()
-    } else {
-        text
-    };
-    if text.is_empty() {
-        text = "（本文なし）".into();
-    }
+    let mut text = display::summary(text, names, MESSAGE_CHARS);
     if text.starts_with('[') {
         text.insert(0, '\\');
     }
     text
 }
 
-fn render(text: &str, names: &BTreeMap<String, String>) -> String {
-    let mut out = String::new();
-    let mut rest = text;
-    while let Some(start) = rest.find('<') {
-        out.push_str(&rest[..start]);
-        let after = &rest[start + 1..];
-        let Some(end) = after.find('>') else {
-            out.push_str(&rest[start..]);
-            rest = "";
-            break;
-        };
-        out.push_str(&render_token(&after[..end], names));
-        rest = &after[end + 1..];
-    }
-    out.push_str(rest);
-    out.replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&amp;", "&")
-}
-
-fn render_token(token: &str, names: &BTreeMap<String, String>) -> String {
-    let (target, label) = match token.split_once('|') {
-        Some((target, label)) => (target, Some(label)),
-        None => (token, None),
-    };
-    if let Some(id) = target.strip_prefix('@') {
-        let name = names.get(id).map(String::as_str).or(label).unwrap_or(id);
-        return format!("@{name}");
-    }
-    if let Some(id) = target.strip_prefix('#') {
-        return format!("#{}", label.unwrap_or(id));
-    }
-    if let Some(special) = target.strip_prefix('!') {
-        return match (special, label) {
-            ("here" | "channel" | "everyone", _) => format!("@{special}"),
-            (_, Some(label)) => label.to_owned(),
-            (_, None) => format!("@{}", special.split('^').next().unwrap_or(special)),
-        };
-    }
-    label.unwrap_or(target).to_owned()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn item(channel: &str, ts: &str) -> Item {
-        Item {
-            workspace: "home".into(),
-            channel_id: channel.into(),
-            channel_name: "general".into(),
-            is_im: false,
-            is_mpim: false,
-            peer_name: None,
-            user: Some("U2".into()),
-            user_name: Some("相手".into()),
-            ts: ts.into(),
-            text: "本文".into(),
-            permalink: format!("https://example.slack.com/archives/{channel}/p{ts}"),
-        }
-    }
+    use crate::display::tests::item;
 
     #[test]
-    fn renders_slack_markup() {
-        let names = BTreeMap::from([("U1".to_owned(), "自分".to_owned())]);
-        assert_eq!(
-            render(
-                "<@U1> <@U9> <!here> <!channel> <!subteam^S1|@dev> <#C1|general> <https://a.example|リンク> <https://b.example> a &lt;b&gt; &amp; c",
-                &names
-            ),
-            "@自分 @U9 @here @channel @dev #general リンク https://b.example a <b> & c"
-        );
-        assert_eq!(render("閉じない <@U1", &names), "閉じない <@U1");
-    }
-
-    #[test]
-    fn message_is_one_line_and_truncated() {
+    fn message_escapes_leading_bracket() {
         let names = BTreeMap::new();
-        assert_eq!(message("一行目\n\n二行目  三", &names), "一行目 二行目 三");
-        let long = "あ".repeat(MESSAGE_CHARS + 1);
-        assert_eq!(
-            message(&long, &names),
-            format!("{}…", "あ".repeat(MESSAGE_CHARS))
-        );
-        assert_eq!(message("", &names), "（本文なし）");
         assert_eq!(message("[重要]", &names), "\\[重要]");
-    }
-
-    #[test]
-    fn labels_channels() {
-        let mut dm = item("D1", "1.0");
-        dm.is_im = true;
-        dm.channel_name = "U2".into();
-        assert_eq!(channel_label(&dm), "DM U2");
-        dm.peer_name = Some("相手".into());
-        assert_eq!(channel_label(&dm), "DM 相手");
-
-        let mut group = item("G1", "1.0");
-        group.is_mpim = true;
-        assert_eq!(channel_label(&group), "グループ DM");
-
-        assert_eq!(channel_label(&item("C1", "1.0")), "#general");
+        assert_eq!(message("重要 [a]", &names), "重要 [a]");
     }
 
     #[test]

@@ -50,6 +50,13 @@ impl Item {
     }
 }
 
+pub fn ts_seconds(ts: &str) -> i64 {
+    ts.split('.')
+        .next()
+        .and_then(|seconds| seconds.parse().ok())
+        .unwrap_or(0)
+}
+
 pub struct Store {
     dir: PathBuf,
 }
