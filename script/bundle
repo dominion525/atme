@@ -1,0 +1,39 @@
+#!/bin/bash
+# リリースビルドから target/release/atme.app を作って署名する。
+# ATME_SIGN_IDENTITY に証明書の名前（一部でよい）を入れるとその証明書で、無ければ ad-hoc で署名する。
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+version=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$root/Cargo.toml" | head -n 1)
+app="$root/target/release/atme.app"
+
+cargo build --release --manifest-path "$root/Cargo.toml"
+
+rm -rf "$app"
+mkdir -p "$app/Contents/MacOS"
+cp "$root/target/release/atme" "$app/Contents/MacOS/atme"
+cat > "$app/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleExecutable</key>
+  <string>atme</string>
+  <key>CFBundleIdentifier</key>
+  <string>com.dominion525.atme</string>
+  <key>CFBundleName</key>
+  <string>atme</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>$version</string>
+  <key>CFBundleVersion</key>
+  <string>$version</string>
+  <key>LSUIElement</key>
+  <true/>
+</dict>
+</plist>
+PLIST
+
+codesign --force --options runtime --sign "${ATME_SIGN_IDENTITY:--}" "$app"
+echo "$app"

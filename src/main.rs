@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 
+mod app;
 mod config;
 mod credentials;
 mod display;
@@ -15,8 +16,9 @@ mod state;
     about = "Slack の自分宛メンションと DM を見落とさないためのツール"
 )]
 struct Cli {
+    /// 省略すると通知の許可を求める（atme.app を open したときの動き）
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 #[derive(Subcommand)]
@@ -32,7 +34,8 @@ enum Command {
 
 fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
-        Command::Fetch => fetch::run(),
-        Command::List { format } => list::run(format),
+        None => app::run(),
+        Some(Command::Fetch) => fetch::run(),
+        Some(Command::List { format }) => list::run(format),
     }
 }
