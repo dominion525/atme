@@ -122,8 +122,20 @@ fn user_ids(messages: &[Message]) -> BTreeSet<String> {
         .iter()
         .flat_map(|message| {
             let peer = message.channel.is_im.then(|| message.channel.name.clone());
-            message.user.clone().into_iter().chain(peer)
+            message
+                .user
+                .clone()
+                .into_iter()
+                .chain(peer)
+                .chain(mentioned_ids(&message.text))
         })
+        .collect()
+}
+
+fn mentioned_ids(text: &str) -> Vec<String> {
+    text.split("<@")
+        .skip(1)
+        .filter_map(|rest| Some(rest[..rest.find(['>', '|'])?].to_owned()))
         .collect()
 }
 
@@ -212,6 +224,19 @@ mod tests {
         assert_eq!(after_date(today, 7), "2026-10-21");
         let today = NaiveDate::from_ymd_opt(2026, 11, 3).unwrap();
         assert_eq!(after_date(today, 7), "2026-10-27");
+    }
+
+    #[test]
+    fn user_ids_include_senders_peers_and_mentions() {
+        let mut dm = message("D1", Some("U2"), "1.0");
+        dm.channel.is_im = true;
+        dm.channel.name = "U3".into();
+        dm.text = "<@U1> と <@U4|someone> へ。閉じない <@U5".into();
+        let bot = message("C1", None, "2.0");
+
+        let ids = user_ids(&[dm, bot]);
+
+        assert_eq!(ids, ["U1", "U2", "U3", "U4"].map(String::from).into());
     }
 
     #[test]
