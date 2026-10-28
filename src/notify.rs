@@ -5,12 +5,13 @@ use std::time::Duration;
 
 use block2::RcBlock;
 use objc2::rc::Retained;
-use objc2_foundation::{NSBundle, NSDictionary, NSError, NSString};
+use objc2_foundation::{NSDictionary, NSError, NSString};
 use objc2_user_notifications::{
     UNAuthorizationStatus, UNMutableNotificationContent, UNNotificationRequest,
     UNNotificationSettings, UNNotificationSound, UNUserNotificationCenter,
 };
 
+use crate::app;
 use crate::display;
 use crate::state::{Item, Users};
 
@@ -33,7 +34,7 @@ pub fn notify(items: &[Item], users: &Users) {
     if notifications.is_empty() {
         return;
     }
-    if NSBundle::mainBundle().bundleIdentifier().is_none() {
+    if !app::in_app_bundle() {
         eprintln!("atme.app の外から実行したため、通知を出しません");
         return;
     }
@@ -68,24 +69,9 @@ fn authorization_status(center: &UNUserNotificationCenter) -> Option<UNAuthoriza
 }
 
 fn send(center: &UNUserNotificationCenter, notification: &Notification) -> Result<(), String> {
-    let content = UNMutableNotificationContent::new();
-    content.setTitle(&NSString::from_str(&notification.title));
-    if let Some(subtitle) = &notification.subtitle {
-        content.setSubtitle(&NSString::from_str(subtitle));
-    }
-    content.setBody(&NSString::from_str(&notification.message));
-    content.setSound(Some(&UNNotificationSound::defaultSound()));
-    if let Some(open) = &notification.open {
-        let key = NSString::from_str(PERMALINK_KEY);
-        let value = NSString::from_str(open);
-        let info = NSDictionary::<NSString, NSString>::from_slices(&[&*key], &[&*value]);
-        // userInfo は型を指定しない NSDictionary を受け取る。NSString 同士の辞書もそのまま渡せる
-        let info: Retained<NSDictionary> = unsafe { Retained::cast_unchecked(info) };
-        unsafe { content.setUserInfo(&info) };
-    }
     let request = UNNotificationRequest::requestWithIdentifier_content_trigger(
         &NSString::from_str(&notification.identifier),
-        &content,
+        &content(notification),
         None,
     );
 
@@ -100,6 +86,28 @@ fn send(center: &UNUserNotificationCenter, notification: &Notification) -> Resul
         Ok(Some(error)) => Err(error),
         Err(_) => Err("通知の登録の応答がありませんでした".into()),
     }
+}
+
+fn content(notification: &Notification) -> Retained<UNMutableNotificationContent> {
+    let content = UNMutableNotificationContent::new();
+    content.setTitle(&NSString::from_str(&notification.title));
+    if let Some(subtitle) = &notification.subtitle {
+        content.setSubtitle(&NSString::from_str(subtitle));
+    }
+    content.setBody(&NSString::from_str(&notification.message));
+    content.setSound(Some(&UNNotificationSound::defaultSound()));
+    if let Some(open) = &notification.open {
+        unsafe { content.setUserInfo(&user_info(open)) };
+    }
+    content
+}
+
+pub fn user_info(permalink: &str) -> Retained<NSDictionary> {
+    let key = NSString::from_str(PERMALINK_KEY);
+    let value = NSString::from_str(permalink);
+    let info = NSDictionary::<NSString, NSString>::from_slices(&[&*key], &[&*value]);
+    // userInfo は型を指定しない NSDictionary を受け取る。NSString 同士の辞書もそのまま渡せる
+    unsafe { Retained::cast_unchecked(info) }
 }
 
 fn plan(items: &[Item], users: &Users) -> Vec<Notification> {
@@ -144,6 +152,47 @@ mod tests {
         assert_eq!(planned[0].subtitle.as_deref(), Some("相手"));
         assert_eq!(planned[0].open, Some(items[1].permalink.clone()));
         assert_eq!(planned[1].open, Some(items[0].permalink.clone()));
+    }
+
+    #[test]
+    fn builds_content_with_permalink() {
+        let notification = Notification {
+            identifier: "home/C1/1.0".into(),
+            title: "home / #general".into(),
+            subtitle: Some("相手".into()),
+            message: "本文".into(),
+            open: Some("https://example.slack.com/archives/C1/p1".into()),
+        };
+
+        let content = content(&notification);
+
+        assert_eq!(content.title().to_string(), "home / #general");
+        assert_eq!(content.subtitle().to_string(), "相手");
+        assert_eq!(content.body().to_string(), "本文");
+        assert!(content.sound().is_some());
+        assert_eq!(
+            crate::app::permalink(&content.userInfo())
+                .and_then(|url| url.absoluteString())
+                .map(|url| url.to_string()),
+            Some("https://example.slack.com/archives/C1/p1".into())
+        );
+    }
+
+    #[test]
+    fn builds_content_without_permalink() {
+        let notification = Notification {
+            identifier: "summary/1.0".into(),
+            title: "atme".into(),
+            subtitle: None,
+            message: "ほか 2 件の新着があります".into(),
+            open: None,
+        };
+
+        let content = content(&notification);
+
+        assert_eq!(content.title().to_string(), "atme");
+        assert_eq!(content.userInfo().count(), 0);
+        assert!(crate::app::permalink(&content.userInfo()).is_none());
     }
 
     #[test]
