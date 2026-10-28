@@ -16,8 +16,6 @@ pub struct Client {
 #[derive(Debug, Deserialize)]
 pub struct AuthTest {
     pub user_id: String,
-    pub team: String,
-    pub url: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -40,6 +38,34 @@ pub struct Channel {
     pub is_mpim: bool,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct User {
+    pub name: String,
+    #[serde(default)]
+    pub profile: Profile,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct Profile {
+    #[serde(default)]
+    pub display_name: String,
+    #[serde(default)]
+    pub real_name: String,
+}
+
+impl User {
+    pub fn label(&self) -> &str {
+        [
+            &self.profile.display_name,
+            &self.profile.real_name,
+            &self.name,
+        ]
+        .into_iter()
+        .find(|s| !s.is_empty())
+        .map_or("", |s| s.as_str())
+    }
+}
+
 #[derive(Deserialize)]
 struct Envelope {
     ok: bool,
@@ -60,6 +86,11 @@ struct SearchMessages {
 #[derive(Deserialize)]
 struct Paging {
     pages: u32,
+}
+
+#[derive(Deserialize)]
+struct UsersInfoResponse {
+    user: User,
 }
 
 impl Client {
@@ -98,6 +129,11 @@ impl Client {
             page += 1;
         }
         Ok(messages)
+    }
+
+    pub fn users_info(&self, user: &str) -> Result<User> {
+        let response: UsersInfoResponse = self.call("users.info", &[("user", user)])?;
+        Ok(response.user)
     }
 
     fn call<T: DeserializeOwned>(&self, method: &str, params: &[(&str, &str)]) -> Result<T> {
