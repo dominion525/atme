@@ -4,15 +4,18 @@ use std::fmt::Display;
 use chrono::TimeZone;
 
 use crate::display;
+use crate::fetch::Report;
 use crate::state::{Cache, Users};
 
 const MESSAGE_CHARS: usize = 50;
+const FAILURE_CHARS: usize = 60;
 
 #[derive(Debug, PartialEq)]
 pub enum Entry {
     Message { label: String, permalink: String },
     Info(String),
     Separator,
+    FetchNow,
     Quit,
 }
 
@@ -22,7 +25,12 @@ pub struct Menu {
     pub entries: Vec<Entry>,
 }
 
-pub fn build<Tz: TimeZone>(cache: Option<&Cache>, users: &Users, tz: &Tz) -> Menu
+pub fn build<Tz: TimeZone>(
+    cache: Option<&Cache>,
+    users: &Users,
+    tz: &Tz,
+    failures: &[String],
+) -> Menu
 where
     Tz::Offset: Display,
 {
@@ -30,6 +38,7 @@ where
     let title = match cache {
         None => {
             entries.push(Entry::Info("キャッシュがありません".into()));
+            entries.push(Entry::Separator);
             "@ ?".into()
         }
         Some(cache) => {
@@ -64,9 +73,37 @@ where
             }
         }
     };
+    entries.extend(failures.iter().cloned().map(Entry::Info));
+    entries.push(Entry::FetchNow);
     entries.push(Entry::Separator);
     entries.push(Entry::Quit);
     Menu { title, entries }
+}
+
+pub fn failure_lines(result: &anyhow::Result<Vec<Report>>) -> Vec<String> {
+    match result {
+        Err(error) => vec![format!("取得に失敗：{}", shorten(&format!("{error:#}")))],
+        Ok(reports) => reports
+            .iter()
+            .filter_map(|report| {
+                let error = report.result.as_ref().err()?;
+                Some(format!(
+                    "取得に失敗：{}（{}）",
+                    report.workspace,
+                    shorten(error)
+                ))
+            })
+            .collect(),
+    }
+}
+
+fn shorten(text: &str) -> String {
+    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if text.chars().count() > FAILURE_CHARS {
+        text.chars().take(FAILURE_CHARS).chain(['…']).collect()
+    } else {
+        text
+    }
 }
 
 #[cfg(test)]
@@ -74,9 +111,11 @@ mod tests {
     use super::*;
     use crate::display::tests::{cache, jst, users};
 
+    use crate::fetch::Counts;
+
     #[test]
     fn lists_messages_with_count() {
-        let menu = build(Some(&cache()), &users(), &jst());
+        let menu = build(Some(&cache()), &users(), &jst(), &[]);
 
         assert_eq!(menu.title, "@ 2");
         assert_eq!(
@@ -92,6 +131,7 @@ mod tests {
                 },
                 Entry::Separator,
                 Entry::Info("取得 10/28 19:05".into()),
+                Entry::FetchNow,
                 Entry::Separator,
                 Entry::Quit,
             ]
@@ -103,7 +143,7 @@ mod tests {
         let mut empty = cache();
         empty.items.clear();
 
-        let menu = build(Some(&empty), &users(), &jst());
+        let menu = build(Some(&empty), &users(), &jst(), &[]);
 
         assert_eq!(menu.title, "@");
         assert_eq!(
@@ -112,6 +152,7 @@ mod tests {
                 Entry::Info("メンションと DM はありません".into()),
                 Entry::Separator,
                 Entry::Info("取得 10/28 19:05".into()),
+                Entry::FetchNow,
                 Entry::Separator,
                 Entry::Quit,
             ]
@@ -120,7 +161,7 @@ mod tests {
 
     #[test]
     fn shows_question_without_cache() {
-        let menu = build(None, &users(), &jst());
+        let menu = build(None, &users(), &jst(), &[]);
 
         assert_eq!(menu.title, "@ ?");
         assert_eq!(
@@ -128,8 +169,56 @@ mod tests {
             [
                 Entry::Info("キャッシュがありません".into()),
                 Entry::Separator,
+                Entry::FetchNow,
+                Entry::Separator,
                 Entry::Quit,
             ]
+        );
+    }
+
+    #[test]
+    fn shows_failures_before_fetch_now() {
+        let failures = ["取得に失敗：home（x）".to_owned()];
+
+        let menu = build(None, &users(), &jst(), &failures);
+
+        assert_eq!(
+            menu.entries[2..],
+            [
+                Entry::Info("取得に失敗：home（x）".into()),
+                Entry::FetchNow,
+                Entry::Separator,
+                Entry::Quit,
+            ]
+        );
+    }
+
+    #[test]
+    fn failure_lines_from_reports() {
+        let reports = Ok(vec![
+            Report {
+                workspace: "home".into(),
+                result: Ok(Counts { total: 1, new: 0 }),
+            },
+            Report {
+                workspace: "work".into(),
+                result: Err("auth.test を呼び出せませんでした:\n  timed out".into()),
+            },
+        ]);
+
+        assert_eq!(
+            failure_lines(&reports),
+            ["取得に失敗：work（auth.test を呼び出せませんでした: timed out）"]
+        );
+    }
+
+    #[test]
+    fn failure_line_for_whole_fetch_is_shortened() {
+        let result = Err(anyhow::anyhow!("{}", "あ".repeat(FAILURE_CHARS + 1)));
+
+        assert_eq!(
+            failure_lines(&result),
+            [format!("取得に失敗：{}…", "あ".repeat(FAILURE_CHARS))]
         );
     }
 }

@@ -1,25 +1,44 @@
+use std::cell::RefCell;
+use std::sync::mpsc::Sender;
+use std::time::Duration;
+
 use anyhow::{bail, Context, Result};
 use block2::{DynBlock, RcBlock};
 use chrono::Local;
+use dispatch2::DispatchQueue;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Bool, ProtocolObject, Sel};
-use objc2::{define_class, msg_send, sel, AnyThread, MainThreadOnly};
+use objc2::{define_class, msg_send, sel, AnyThread, DefinedClass, MainThreadOnly};
 use objc2_app_kit::{
     NSApplication, NSMenu, NSMenuItem, NSStatusBar, NSStatusItem, NSVariableStatusItemLength,
-    NSWorkspace,
+    NSWorkspace, NSWorkspaceDidWakeNotification,
 };
 use objc2_foundation::{
-    ns_string, MainThreadMarker, NSBundle, NSDictionary, NSError, NSObject, NSObjectProtocol,
-    NSString, NSURL,
+    ns_string, MainThreadMarker, NSBundle, NSDictionary, NSError, NSNotification, NSObject,
+    NSObjectProtocol, NSString, NSURL,
 };
 use objc2_user_notifications::{
     UNAuthorizationOptions, UNNotificationResponse, UNUserNotificationCenter,
     UNUserNotificationCenterDelegate,
 };
 
+use crate::fetch;
 use crate::menu::{self, Entry, Menu};
 use crate::notify::PERMALINK_KEY;
+use crate::scheduler;
 use crate::state::Store;
+
+const FETCH_INTERVAL: Duration = Duration::from_secs(300);
+
+struct Ui {
+    status_item: Retained<NSStatusItem>,
+    target: Retained<MenuTarget>,
+}
+
+thread_local! {
+    // メインスレッドだけが触る。取得のスレッドからは DispatchQueue::main 経由で refresh を呼ぶ
+    static UI: RefCell<Option<Ui>> = const { RefCell::new(None) };
+}
 
 define_class!(
     // SAFETY: NSObject にサブクラスの条件は無く、この型は Drop を実装しない
@@ -58,9 +77,20 @@ define_class!(
     #[unsafe(super = NSObject)]
     #[thread_kind = MainThreadOnly]
     #[name = "AtmeMenuTarget"]
+    #[ivars = Sender<()>]
     struct MenuTarget;
 
     impl MenuTarget {
+        #[unsafe(method(fetchNow:))]
+        fn fetch_now(&self, _sender: &NSMenuItem) {
+            let _ = self.ivars().send(());
+        }
+
+        #[unsafe(method(didWake:))]
+        fn did_wake(&self, _notification: &NSNotification) {
+            let _ = self.ivars().send(());
+        }
+
         #[unsafe(method(openPermalink:))]
         fn open_permalink(&self, sender: &NSMenuItem) {
             if let Some(url) = sender.representedObject().and_then(url_from) {
@@ -76,8 +106,8 @@ define_class!(
 );
 
 impl MenuTarget {
-    fn new(mtm: MainThreadMarker) -> Retained<Self> {
-        let this = Self::alloc(mtm).set_ivars(());
+    fn new(mtm: MainThreadMarker, trigger: Sender<()>) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(trigger);
         unsafe { msg_send![super(this), init] }
     }
 }
@@ -97,24 +127,54 @@ pub fn run() -> Result<()> {
     center.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
     request_authorization(&center);
 
-    let store = Store::open()?;
-    let cache = store.load_cache().unwrap_or_else(|error| {
-        eprintln!("{error:#}");
-        None
+    let (trigger, _worker) = scheduler::spawn(FETCH_INTERVAL, || {
+        let failures = menu::failure_lines(&fetch::fetch_once());
+        DispatchQueue::main().exec_async(move || refresh(&failures));
     });
-    let users = store.load_users().ok().flatten().unwrap_or_default();
-    let target = MenuTarget::new(mtm);
+    let target = MenuTarget::new(mtm, trigger);
+    let observer: &AnyObject = &target;
+    unsafe {
+        NSWorkspace::sharedWorkspace()
+            .notificationCenter()
+            .addObserver_selector_name_object(
+                observer,
+                sel!(didWake:),
+                Some(NSWorkspaceDidWakeNotification),
+                None,
+            );
+    }
     let status_item =
         NSStatusBar::systemStatusBar().statusItemWithLength(NSVariableStatusItemLength);
-    show(
-        &status_item,
-        &menu::build(cache.as_ref(), &users, &Local),
-        &target,
-        mtm,
-    );
+    UI.with(|ui| {
+        *ui.borrow_mut() = Some(Ui {
+            status_item,
+            target,
+        })
+    });
+    refresh(&[]);
 
     app.run();
     Ok(())
+}
+
+fn refresh(failures: &[String]) {
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let store = Store::open().ok();
+    let cache = store
+        .as_ref()
+        .and_then(|store| store.load_cache().ok().flatten());
+    let users = store
+        .as_ref()
+        .and_then(|store| store.load_users().ok().flatten())
+        .unwrap_or_default();
+    let model = menu::build(cache.as_ref(), &users, &Local, failures);
+    UI.with(|ui| {
+        if let Some(ui) = ui.borrow().as_ref() {
+            show(&ui.status_item, &model, &ui.target, mtm);
+        }
+    });
 }
 
 fn show(status_item: &NSStatusItem, model: &Menu, target: &MenuTarget, mtm: MainThreadMarker) {
@@ -146,6 +206,11 @@ fn menu_item(entry: &Entry, target: &MenuTarget, mtm: MainThreadMarker) -> Retai
                 item.setTarget(Some(target));
                 item.setRepresentedObject(Some(permalink));
             }
+            item
+        }
+        Entry::FetchNow => {
+            let item = new_item("今すぐ取得", Some(sel!(fetchNow:)), mtm);
+            unsafe { item.setTarget(Some(target)) };
             item
         }
         Entry::Quit => {

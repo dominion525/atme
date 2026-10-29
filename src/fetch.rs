@@ -11,7 +11,39 @@ use crate::state::{ts_seconds, Cache, Item, Seen, Store};
 
 const SECONDS_PER_DAY: i64 = 86_400;
 
+#[derive(Debug, PartialEq)]
+pub struct Report {
+    pub workspace: String,
+    pub result: std::result::Result<Counts, String>,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Counts {
+    pub total: usize,
+    pub new: usize,
+}
+
 pub fn run() -> Result<()> {
+    let mut failed = false;
+    for report in fetch_once()? {
+        match report.result {
+            Ok(counts) => println!(
+                "{}: {} 件、新着 {} 件",
+                report.workspace, counts.total, counts.new
+            ),
+            Err(error) => {
+                eprintln!("{}: {error}", report.workspace);
+                failed = true;
+            }
+        }
+    }
+    if failed {
+        bail!("取得に失敗したワークスペースがあります");
+    }
+    Ok(())
+}
+
+pub fn fetch_once() -> Result<Vec<Report>> {
     let config = Config::load()?;
     let store = Store::open()?;
     let previous_seen = store.load_seen()?;
@@ -21,18 +53,16 @@ pub fn run() -> Result<()> {
     let after = after_date(now.date_naive(), config.days);
 
     let mut items = Vec::new();
-    let mut fetched = Vec::new();
-    let mut failed = false;
+    let mut errors = Vec::new();
     for workspace in &config.workspace {
         let names = users.entry(workspace.name.clone()).or_default();
         match fetch_workspace(workspace, &after, names) {
             Ok(workspace_items) => {
-                fetched.push(workspace.name.as_str());
+                errors.push(None);
                 items.extend(workspace_items);
             }
             Err(error) => {
-                eprintln!("{}: {error:#}", workspace.name);
-                failed = true;
+                errors.push(Some(format!("{error:#}")));
                 items.extend(
                     previous_cache
                         .items
@@ -47,14 +77,27 @@ pub fn run() -> Result<()> {
 
     let cutoff = now.timestamp() - i64::from(config.days) * SECONDS_PER_DAY;
     let (new_items, seen) = diff(previous_seen.as_ref(), &items, cutoff);
-    for name in fetched {
-        let total = items.iter().filter(|item| item.workspace == name).count();
-        let new = new_items
-            .iter()
-            .filter(|item| item.workspace == name)
-            .count();
-        println!("{name}: {total} 件、新着 {new} 件");
-    }
+    let reports = config
+        .workspace
+        .iter()
+        .zip(errors)
+        .map(|(workspace, error)| Report {
+            workspace: workspace.name.clone(),
+            result: match error {
+                Some(error) => Err(error),
+                None => Ok(Counts {
+                    total: items
+                        .iter()
+                        .filter(|item| item.workspace == workspace.name)
+                        .count(),
+                    new: new_items
+                        .iter()
+                        .filter(|item| item.workspace == workspace.name)
+                        .count(),
+                }),
+            },
+        })
+        .collect();
     notify::notify(&new_items, &users);
 
     store.save_seen(&seen)?;
@@ -63,10 +106,7 @@ pub fn run() -> Result<()> {
         items,
     })?;
     store.save_users(&users)?;
-    if failed {
-        bail!("取得に失敗したワークスペースがあります");
-    }
-    Ok(())
+    Ok(reports)
 }
 
 fn fetch_workspace(
