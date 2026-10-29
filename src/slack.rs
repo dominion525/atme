@@ -6,6 +6,23 @@ use serde::Deserialize;
 
 use crate::config::Workspace;
 use crate::credentials::Credentials;
+use crate::read::{ChannelState, ReadSource, ThreadState};
+
+impl ReadSource for Client {
+    fn channel(&self, channel: &str) -> Option<ChannelState> {
+        self.conversation_state(channel)
+            .inspect_err(|error| eprintln!("{channel} の既読を読めませんでした: {error:#}"))
+            .ok()
+    }
+
+    fn thread(&self, channel: &str, thread_ts: &str) -> Option<ThreadState> {
+        self.thread_state(channel, thread_ts)
+            .inspect_err(|error| {
+                eprintln!("{channel} のスレッド {thread_ts} の既読を読めませんでした: {error:#}")
+            })
+            .ok()
+    }
+}
 
 pub struct Client {
     http: HttpClient,
@@ -93,6 +110,30 @@ struct UsersInfoResponse {
     user: User,
 }
 
+#[derive(Deserialize)]
+struct ConversationsInfoResponse {
+    channel: ConversationInfo,
+}
+
+#[derive(Deserialize)]
+struct ConversationInfo {
+    #[serde(default)]
+    is_archived: bool,
+    last_read: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct RepliesResponse {
+    messages: Vec<ReplyMessage>,
+}
+
+#[derive(Deserialize)]
+struct ReplyMessage {
+    #[serde(default)]
+    subscribed: bool,
+    last_read: Option<String>,
+}
+
 impl Client {
     pub fn new(workspace: &Workspace, credentials: Credentials) -> Result<Self> {
         let base_url = match credentials {
@@ -134,6 +175,32 @@ impl Client {
     pub fn users_info(&self, user: &str) -> Result<User> {
         let response: UsersInfoResponse = self.call("users.info", &[("user", user)])?;
         Ok(response.user)
+    }
+
+    pub fn conversation_state(&self, channel: &str) -> Result<ChannelState> {
+        let response: ConversationsInfoResponse =
+            self.call("conversations.info", &[("channel", channel)])?;
+        Ok(ChannelState {
+            archived: response.channel.is_archived,
+            last_read: response.channel.last_read,
+        })
+    }
+
+    /// スレッドの親のメッセージに付いてくる、自分の subscribe の有無と既読の位置を読む
+    pub fn thread_state(&self, channel: &str, thread_ts: &str) -> Result<ThreadState> {
+        let response: RepliesResponse = self.call(
+            "conversations.replies",
+            &[("channel", channel), ("ts", thread_ts), ("limit", "1")],
+        )?;
+        let parent = response
+            .messages
+            .into_iter()
+            .next()
+            .context("conversations.replies がスレッドの親を返しませんでした")?;
+        Ok(ThreadState {
+            subscribed: parent.subscribed,
+            last_read: parent.last_read,
+        })
     }
 
     fn call<T: DeserializeOwned>(&self, method: &str, params: &[(&str, &str)]) -> Result<T> {

@@ -8,6 +8,7 @@ mod fetch;
 mod list;
 mod menu;
 mod notify;
+mod read;
 mod scheduler;
 mod slack;
 mod state;

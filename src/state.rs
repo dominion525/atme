@@ -38,9 +38,18 @@ pub struct Item {
     pub ts: String,
     pub text: String,
     pub permalink: String,
+    #[serde(default)]
+    pub thread_ts: Option<String>,
 }
 
 impl Item {
+    /// スレッドの返信なら、スレッドの親の ts を返す（親のメッセージ自身は返信ではない）
+    pub fn reply_parent(&self) -> Option<&str> {
+        self.thread_ts
+            .as_deref()
+            .filter(|parent| *parent != self.ts)
+    }
+
     pub fn key(&self) -> SeenKey {
         SeenKey {
             workspace: self.workspace.clone(),

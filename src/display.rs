@@ -131,6 +131,7 @@ pub mod tests {
             ts: ts.into(),
             text: "本文".into(),
             permalink: format!("https://example.slack.com/archives/{channel}/p{ts}"),
+            thread_ts: None,
         }
     }
 

@@ -6,6 +6,7 @@ use chrono::{Local, NaiveDate, TimeDelta};
 use crate::config::{Config, Workspace};
 use crate::credentials::Credentials;
 use crate::notify;
+use crate::read;
 use crate::slack::{Client, Message};
 use crate::state::{ts_seconds, Cache, Item, Seen, Store};
 
@@ -56,7 +57,13 @@ pub fn fetch_once() -> Result<Vec<Report>> {
     let mut errors = Vec::new();
     for workspace in &config.workspace {
         let names = users.entry(workspace.name.clone()).or_default();
-        match fetch_workspace(workspace, &after, names) {
+        let previous: Vec<Item> = previous_cache
+            .items
+            .iter()
+            .filter(|item| item.workspace == workspace.name)
+            .cloned()
+            .collect();
+        match fetch_workspace(workspace, &after, names, previous) {
             Ok(workspace_items) => {
                 errors.push(None);
                 items.extend(workspace_items);
@@ -113,6 +120,7 @@ fn fetch_workspace(
     workspace: &Workspace,
     after: &str,
     names: &mut BTreeMap<String, String>,
+    previous: Vec<Item>,
 ) -> Result<Vec<Item>> {
     let client = Client::new(workspace, Credentials::load(workspace)?)?;
     let me = client.auth_test()?.user_id;
@@ -136,10 +144,11 @@ fn fetch_workspace(
             }
         }
     }
-    Ok(messages
+    let fresh = messages
         .into_iter()
         .map(|message| to_item(&workspace.name, message, names))
-        .collect())
+        .collect();
+    Ok(read::unread_only(merge(fresh, previous), &client))
 }
 
 fn after_date(today: NaiveDate, days: u32) -> String {
@@ -201,8 +210,30 @@ fn to_item(workspace: &str, message: Message, names: &BTreeMap<String, String>) 
         user_name,
         ts: message.ts,
         text: message.text,
+        thread_ts: thread_ts(&message.permalink),
         permalink: message.permalink,
     }
+}
+
+/// スレッドの中のメッセージの permalink には `?thread_ts=…` が付く
+fn thread_ts(permalink: &str) -> Option<String> {
+    let (_, query) = permalink.split_once('?')?;
+    query
+        .split('&')
+        .find_map(|pair| pair.strip_prefix("thread_ts="))
+        .map(str::to_owned)
+}
+
+/// 今回の検索結果に、前回の未読のうち今回の結果に無いもの（取得の範囲から外れたものなど）を足す
+fn merge(fresh: Vec<Item>, previous: Vec<Item>) -> Vec<Item> {
+    let keys: BTreeSet<_> = fresh.iter().map(Item::key).collect();
+    let mut items = fresh;
+    items.extend(
+        previous
+            .into_iter()
+            .filter(|item| !keys.contains(&item.key())),
+    );
+    items
 }
 
 fn diff(previous: Option<&Seen>, items: &[Item], cutoff: i64) -> (Vec<Item>, Seen) {
@@ -214,12 +245,14 @@ fn diff(previous: Option<&Seen>, items: &[Item], cutoff: i64) -> (Vec<Item>, See
             .collect(),
         None => Vec::new(),
     };
+    // 一覧に残っている（未読の）項目は、日数に関係なく残す。消すとまた新着として通知してしまう
+    let current: BTreeSet<_> = items.iter().map(Item::key).collect();
     let seen = previous
         .into_iter()
         .flatten()
         .cloned()
-        .chain(items.iter().map(Item::key))
-        .filter(|key| ts_seconds(&key.ts) >= cutoff)
+        .chain(current.iter().cloned())
+        .filter(|key| ts_seconds(&key.ts) >= cutoff || current.contains(key))
         .collect();
     (new, seen)
 }
@@ -352,5 +385,49 @@ mod tests {
         let (_, seen) = diff(Some(&previous), &[], 1000);
 
         assert_eq!(seen, [key("C1", "1000.000001")].into());
+    }
+
+    #[test]
+    fn keeps_seen_keys_of_items_still_listed() {
+        let previous: Seen = [key("C1", "999.000001")].into();
+        let items = [item("C1", "999.000001")];
+
+        let (new, seen) = diff(Some(&previous), &items, 1000);
+
+        assert!(new.is_empty());
+        assert_eq!(seen, [key("C1", "999.000001")].into());
+    }
+
+    #[test]
+    fn reads_thread_ts_from_permalink() {
+        assert_eq!(
+            thread_ts("https://x.slack.com/archives/C1/p1000000002?thread_ts=1000.000001&cid=C1")
+                .as_deref(),
+            Some("1000.000001")
+        );
+        assert_eq!(
+            thread_ts("https://x.slack.com/archives/C1/p1000000002"),
+            None
+        );
+        assert_eq!(thread_ts("https://x.slack.com/archives/C1/p1?cid=C1"), None);
+    }
+
+    #[test]
+    fn merge_prefers_fresh_and_keeps_previous_unread() {
+        let mut fresh_version = item("C1", "1000.000001");
+        fresh_version.text = "新しい本文".into();
+        let fresh = vec![fresh_version];
+        let previous = vec![item("C1", "1000.000001"), item("C1", "900.000001")];
+
+        let merged = merge(fresh, previous);
+
+        let keys: Vec<_> = merged
+            .iter()
+            .map(|item| (item.ts.as_str(), item.text.as_str()))
+            .collect();
+        assert_eq!(
+            keys,
+            [("1000.000001", "新しい本文"), ("900.000001", "")]
+        );
     }
 }
