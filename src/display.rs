@@ -5,8 +5,17 @@ use chrono::TimeZone;
 
 use crate::state::Item;
 
-pub fn location(item: &Item) -> String {
-    format!("{} / {}", item.workspace, channel_label(item))
+/// Slack 上のワークスペース名。まだ取得できていなければ設定の name を使う
+pub fn workspace_name<'a>(teams: &'a BTreeMap<String, String>, workspace: &'a str) -> &'a str {
+    teams.get(workspace).map_or(workspace, String::as_str)
+}
+
+pub fn location(item: &Item, teams: &BTreeMap<String, String>) -> String {
+    format!(
+        "{} / {}",
+        workspace_name(teams, &item.workspace),
+        channel_label(item)
+    )
 }
 
 pub fn format_time<Tz: TimeZone>(tz: &Tz, seconds: i64, pattern: &str) -> String
@@ -108,6 +117,7 @@ pub mod tests {
         Cache {
             fetched_at: 1793181900,
             items: vec![dm, bot],
+            teams: BTreeMap::from([("home".to_owned(), "Home 株式会社".to_owned())]),
         }
     }
 
@@ -158,6 +168,14 @@ pub mod tests {
         assert_eq!(summary("あいうえお", &names, 3), "あいう…");
         assert_eq!(summary("あいう", &names, 3), "あいう");
         assert_eq!(summary("", &names, 3), "（本文なし）");
+    }
+
+    #[test]
+    fn workspace_name_falls_back_to_config_name() {
+        let teams = cache().teams;
+
+        assert_eq!(workspace_name(&teams, "home"), "Home 株式会社");
+        assert_eq!(workspace_name(&teams, "work"), "work");
     }
 
     #[test]

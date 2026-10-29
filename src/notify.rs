@@ -31,8 +31,8 @@ struct Notification {
     open: Option<String>,
 }
 
-pub fn notify(items: &[Item], users: &Users) {
-    let notifications = plan(items, users);
+pub fn notify(items: &[Item], users: &Users, teams: &BTreeMap<String, String>) {
+    let notifications = plan(items, users, teams);
     if notifications.is_empty() {
         return;
     }
@@ -116,7 +116,7 @@ pub fn user_info(permalink: &str) -> Retained<NSDictionary> {
     unsafe { Retained::cast_unchecked(info) }
 }
 
-fn plan(items: &[Item], users: &Users) -> Vec<Notification> {
+fn plan(items: &[Item], users: &Users, teams: &BTreeMap<String, String>) -> Vec<Notification> {
     let mut notifications = Vec::new();
     if items.len() > MAX_INDIVIDUAL {
         notifications.push(Notification {
@@ -132,7 +132,7 @@ fn plan(items: &[Item], users: &Users) -> Vec<Notification> {
         let names = users.get(&item.workspace).unwrap_or(&empty);
         Notification {
             identifier: format!("{}/{}/{}", item.workspace, item.channel_id, item.ts),
-            title: format!("{} / {}", item.workspace, display::channel_label(item)),
+            title: display::location(item, teams),
             subtitle: item.user_name.clone(),
             message: display::summary(&item.text, names, MESSAGE_CHARS),
             open: Some(item.permalink.clone()),
@@ -150,7 +150,7 @@ mod tests {
     fn plans_individual_notifications_oldest_first() {
         let items = [item("C1", "3.0"), item("C1", "2.0")];
 
-        let planned = plan(&items, &Users::new());
+        let planned = plan(&items, &Users::new(), &BTreeMap::new());
 
         assert_eq!(planned.len(), 2);
         assert_eq!(planned[0].identifier, "home/C1/2.0");
@@ -205,7 +205,7 @@ mod tests {
             .map(|i| item("C1", &format!("{}.0", 100 - i)))
             .collect();
 
-        let planned = plan(&items, &Users::new());
+        let planned = plan(&items, &Users::new(), &BTreeMap::new());
 
         assert_eq!(planned.len(), MAX_INDIVIDUAL + 1);
         assert_eq!(planned[0].identifier, "summary/100.0");

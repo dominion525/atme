@@ -30,7 +30,7 @@ where
         out.push_str(&format!(
             "{}  {}  {}\n  {}\n  {}\n",
             display::format_time(tz, ts_seconds(&item.ts), "%Y-%m-%d %H:%M"),
-            display::location(item),
+            display::location(item, &cache.teams),
             item.user_name.as_deref().unwrap_or(""),
             display::summary(&item.text, names, TEXT_CHARS),
             item.permalink,
@@ -48,8 +48,8 @@ mod tests {
     fn formats_text() {
         assert_eq!(
             text(&cache(), &users(), &jst()),
-            "2026-10-28 19:00  home / DM 相手  相手\n  @自分 a|b 次の行\n  https://example.slack.com/archives/D1/p1793181600.000100\n\
-             2026-10-28 18:00  home / #general  \n  本文\n  https://example.slack.com/archives/C1/p1793178000.000200\n"
+            "2026-10-28 19:00  Home 株式会社 / DM 相手  相手\n  @自分 a|b 次の行\n  https://example.slack.com/archives/D1/p1793181600.000100\n\
+             2026-10-28 18:00  Home 株式会社 / #general  \n  本文\n  https://example.slack.com/archives/C1/p1793178000.000200\n"
         );
     }
 }

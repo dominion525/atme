@@ -23,6 +23,7 @@ use objc2_user_notifications::{
     UNUserNotificationCenterDelegate,
 };
 
+use crate::config::Config;
 use crate::dismiss;
 use crate::fetch;
 use crate::login::{self, LoginState};
@@ -232,15 +233,27 @@ fn refresh() {
             dismissed = pruned;
         }
     }
+    let workspaces: Vec<String> = Config::load()
+        .map(|config| {
+            config
+                .workspace
+                .into_iter()
+                .map(|workspace| workspace.name)
+                .collect()
+        })
+        .unwrap_or_default();
     UI.with(|ui| {
         if let Some(ui) = ui.borrow().as_ref() {
             let model = menu::build(
-                cache.as_ref(),
-                &users,
+                &menu::Inputs {
+                    cache: cache.as_ref(),
+                    users: &users,
+                    failures: &ui.failures,
+                    dismissed: &dismissed,
+                    login: login_state(),
+                    workspaces: &workspaces,
+                },
                 &Local,
-                &ui.failures,
-                &dismissed,
-                login_state(),
             );
             show(&ui.status_item, &model, &ui.target, mtm);
         }
@@ -295,14 +308,26 @@ fn menu_item(entry: &Entry, target: &MenuTarget, mtm: MainThreadMarker) -> Retai
             item.setEnabled(false);
             item
         }
+        Entry::Header(name) => {
+            let item = new_item(name, None, mtm);
+            item.setEnabled(false);
+            item
+        }
         Entry::Message { label, permalink } => {
             let item = new_item(label, Some(sel!(openPermalink:)), mtm);
+            item.setIndentationLevel(1);
             let permalink = NSString::from_str(permalink);
             let permalink: &AnyObject = &permalink;
             unsafe {
                 item.setTarget(Some(target));
                 item.setRepresentedObject(Some(permalink));
             }
+            item
+        }
+        Entry::NoItems => {
+            let item = new_item("なし", None, mtm);
+            item.setIndentationLevel(1);
+            item.setEnabled(false);
             item
         }
         Entry::DismissAll => {

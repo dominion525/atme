@@ -26,6 +26,9 @@ pub type Users = BTreeMap<String, BTreeMap<String, String>>;
 pub struct Cache {
     pub fetched_at: i64,
     pub items: Vec<Item>,
+    /// 設定の name から、Slack 上のワークスペース名への対応
+    #[serde(default)]
+    pub teams: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -55,6 +55,7 @@ pub fn fetch_once() -> Result<Vec<Report>> {
 
     let mut items = Vec::new();
     let mut errors = Vec::new();
+    let mut teams = previous_cache.teams.clone();
     for workspace in &config.workspace {
         let names = users.entry(workspace.name.clone()).or_default();
         let previous: Vec<Item> = previous_cache
@@ -64,8 +65,9 @@ pub fn fetch_once() -> Result<Vec<Report>> {
             .cloned()
             .collect();
         match fetch_workspace(workspace, &after, names, previous) {
-            Ok(workspace_items) => {
+            Ok((team, workspace_items)) => {
                 errors.push(None);
+                teams.insert(workspace.name.clone(), team);
                 items.extend(workspace_items);
             }
             Err(error) => {
@@ -105,12 +107,13 @@ pub fn fetch_once() -> Result<Vec<Report>> {
             },
         })
         .collect();
-    notify::notify(&new_items, &users);
+    notify::notify(&new_items, &users, &teams);
 
     store.save_seen(&seen)?;
     store.save_cache(&Cache {
         fetched_at: now.timestamp(),
         items,
+        teams,
     })?;
     store.save_users(&users)?;
     Ok(reports)
@@ -121,9 +124,10 @@ fn fetch_workspace(
     after: &str,
     names: &mut BTreeMap<String, String>,
     previous: Vec<Item>,
-) -> Result<Vec<Item>> {
+) -> Result<(String, Vec<Item>)> {
     let client = Client::new(workspace, Credentials::load(workspace)?)?;
-    let me = client.auth_test()?.user_id;
+    let auth = client.auth_test()?;
+    let me = auth.user_id;
     let mut messages = client.search_messages(&format!("<@{me}> after:{after}"))?;
     messages.extend(client.search_messages(&format!("to:me after:{after}"))?);
     let messages = select(messages, &me);
@@ -148,7 +152,10 @@ fn fetch_workspace(
         .into_iter()
         .map(|message| to_item(&workspace.name, message, names))
         .collect();
-    Ok(read::unread_only(merge(fresh, previous), &client))
+    Ok((
+        auth.team,
+        read::unread_only(merge(fresh, previous), &client),
+    ))
 }
 
 fn after_date(today: NaiveDate, days: u32) -> String {

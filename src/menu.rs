@@ -14,7 +14,14 @@ const FAILURE_CHARS: usize = 60;
 
 #[derive(Debug, PartialEq)]
 pub enum Entry {
-    Message { label: String, permalink: String },
+    /// ワークスペース名の見出し
+    Header(String),
+    Message {
+        label: String,
+        permalink: String,
+    },
+    /// 見出しの下に置く「なし」
+    NoItems,
     Info(String),
     Separator,
     DismissAll,
@@ -29,43 +36,67 @@ pub struct Menu {
     pub entries: Vec<Entry>,
 }
 
-pub fn build<Tz: TimeZone>(
-    cache: Option<&Cache>,
-    users: &Users,
-    tz: &Tz,
-    failures: &[String],
-    dismissed: &Dismissed,
-    login: LoginState,
-) -> Menu
+pub struct Inputs<'a> {
+    pub cache: Option<&'a Cache>,
+    pub users: &'a Users,
+    pub failures: &'a [String],
+    pub dismissed: &'a Dismissed,
+    pub login: LoginState,
+    /// 設定ファイルに書かれた順のワークスペース（設定の name）
+    pub workspaces: &'a [String],
+}
+
+pub fn build<Tz: TimeZone>(inputs: &Inputs, tz: &Tz) -> Menu
 where
     Tz::Offset: Display,
 {
     let mut entries = Vec::new();
-    let title = match cache {
+    let title = match inputs.cache {
         None => {
             entries.push(Entry::Info("キャッシュがありません".into()));
             entries.push(Entry::Separator);
             "@ ?".into()
         }
         Some(cache) => {
-            let empty = BTreeMap::new();
-            let items = dismiss::visible(cache, dismissed);
-            entries.extend(items.iter().map(|item| {
-                let names = users.get(&item.workspace).unwrap_or(&empty);
-                let sender = match &item.user_name {
-                    Some(name) => format!("  {name}"),
-                    None => String::new(),
-                };
-                Entry::Message {
-                    label: format!(
-                        "{}{sender}: {}",
-                        display::location(item),
-                        display::summary(&item.text, names, MESSAGE_CHARS)
-                    ),
-                    permalink: item.permalink.clone(),
+            let items = dismiss::visible(cache, inputs.dismissed);
+            // 設定に無くなったワークスペースの項目も、見出しを付けて後ろに出す
+            let mut workspaces: Vec<&str> = inputs.workspaces.iter().map(String::as_str).collect();
+            for item in &items {
+                if !workspaces.contains(&item.workspace.as_str()) {
+                    workspaces.push(&item.workspace);
                 }
-            }));
-            if items.is_empty() {
+            }
+            let empty = BTreeMap::new();
+            for workspace in &workspaces {
+                entries.push(Entry::Header(
+                    display::workspace_name(&cache.teams, workspace).to_owned(),
+                ));
+                let names = inputs.users.get(*workspace).unwrap_or(&empty);
+                let before = entries.len();
+                entries.extend(
+                    items
+                        .iter()
+                        .filter(|item| item.workspace == *workspace)
+                        .map(|item| {
+                            let sender = match &item.user_name {
+                                Some(name) => format!("  {name}"),
+                                None => String::new(),
+                            };
+                            Entry::Message {
+                                label: format!(
+                                    "{}{sender}: {}",
+                                    display::channel_label(item),
+                                    display::summary(&item.text, names, MESSAGE_CHARS)
+                                ),
+                                permalink: item.permalink.clone(),
+                            }
+                        }),
+                );
+                if entries.len() == before {
+                    entries.push(Entry::NoItems);
+                }
+            }
+            if workspaces.is_empty() {
                 entries.push(Entry::Info("メンションと DM はありません".into()));
             }
             entries.push(Entry::Separator);
@@ -83,9 +114,9 @@ where
             }
         }
     };
-    entries.extend(failures.iter().cloned().map(Entry::Info));
+    entries.extend(inputs.failures.iter().cloned().map(Entry::Info));
     entries.push(Entry::FetchNow);
-    entries.push(Entry::LaunchAtLogin(login));
+    entries.push(Entry::LaunchAtLogin(inputs.login));
     entries.push(Entry::Separator);
     entries.push(Entry::Quit);
     Menu { title, entries }
@@ -121,41 +152,104 @@ fn shorten(text: &str) -> String {
 mod tests {
     use super::*;
     use crate::display::tests::{cache, jst, users};
-
     use crate::fetch::Counts;
 
-    #[test]
-    fn lists_messages_with_count() {
-        let menu = build(
-            Some(&cache()),
-            &users(),
+    const DM: &str = "https://example.slack.com/archives/D1/p1793181600.000100";
+    const GENERAL: &str = "https://example.slack.com/archives/C1/p1793178000.000200";
+
+    fn build_with(
+        cache: Option<&Cache>,
+        dismissed: &Dismissed,
+        failures: &[String],
+        login: LoginState,
+        workspaces: &[String],
+    ) -> Menu {
+        let users = users();
+        build(
+            &Inputs {
+                cache,
+                users: &users,
+                failures,
+                dismissed,
+                login,
+                workspaces,
+            },
             &jst(),
-            &[],
+        )
+    }
+
+    fn home() -> Vec<String> {
+        vec!["home".to_owned()]
+    }
+
+    fn footer() -> [Entry; 4] {
+        [
+            Entry::FetchNow,
+            Entry::LaunchAtLogin(LoginState::Off),
+            Entry::Separator,
+            Entry::Quit,
+        ]
+    }
+
+    #[test]
+    fn groups_messages_under_workspace_header() {
+        let menu = build_with(
+            Some(&cache()),
             &Dismissed::new(),
+            &[],
             LoginState::Off,
+            &home(),
         );
 
         assert_eq!(menu.title, "@ 2");
         assert_eq!(
-            menu.entries,
+            menu.entries[..6],
             [
+                Entry::Header("Home 株式会社".into()),
                 Entry::Message {
-                    label: "home / DM 相手  相手: @自分 a|b 次の行".into(),
-                    permalink: "https://example.slack.com/archives/D1/p1793181600.000100".into(),
+                    label: "DM 相手  相手: @自分 a|b 次の行".into(),
+                    permalink: DM.into(),
                 },
                 Entry::Message {
-                    label: "home / #general: 本文".into(),
-                    permalink: "https://example.slack.com/archives/C1/p1793178000.000200".into(),
+                    label: "#general: 本文".into(),
+                    permalink: GENERAL.into(),
                 },
                 Entry::Separator,
                 Entry::DismissAll,
                 Entry::Info("取得 10/28 19:05".into()),
-                Entry::FetchNow,
-                Entry::LaunchAtLogin(LoginState::Off),
-                Entry::Separator,
-                Entry::Quit,
             ]
         );
+        assert_eq!(menu.entries[6..], footer());
+    }
+
+    #[test]
+    fn shows_every_configured_workspace_even_without_items() {
+        let workspaces = vec!["work".to_owned(), "home".to_owned()];
+
+        let menu = build_with(
+            Some(&cache()),
+            &Dismissed::new(),
+            &[],
+            LoginState::Off,
+            &workspaces,
+        );
+
+        assert_eq!(
+            menu.entries[..3],
+            [
+                Entry::Header("work".into()),
+                Entry::NoItems,
+                Entry::Header("Home 株式会社".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn keeps_items_of_workspaces_removed_from_config() {
+        let menu = build_with(Some(&cache()), &Dismissed::new(), &[], LoginState::Off, &[]);
+
+        assert_eq!(menu.entries[0], Entry::Header("Home 株式会社".into()));
+        assert_eq!(menu.title, "@ 2");
     }
 
     #[test]
@@ -163,37 +257,48 @@ mod tests {
         let cache = cache();
         let dismissed: Dismissed = [cache.items[0].key()].into();
 
-        let menu = build(
-            Some(&cache),
-            &users(),
-            &jst(),
-            &[],
-            &dismissed,
-            LoginState::Off,
-        );
+        let menu = build_with(Some(&cache), &dismissed, &[], LoginState::Off, &home());
 
         assert_eq!(menu.title, "@ 1");
-        assert!(matches!(
-            &menu.entries[0],
-            Entry::Message { label, .. } if label == "home / #general: 本文"
-        ));
-        assert_eq!(menu.entries[1], Entry::Separator);
-        assert_eq!(menu.entries[2], Entry::DismissAll);
+        assert_eq!(
+            menu.entries[..4],
+            [
+                Entry::Header("Home 株式会社".into()),
+                Entry::Message {
+                    label: "#general: 本文".into(),
+                    permalink: GENERAL.into(),
+                },
+                Entry::Separator,
+                Entry::DismissAll,
+            ]
+        );
     }
 
     #[test]
-    fn all_dismissed_looks_empty() {
+    fn all_dismissed_shows_no_items() {
         let cache = cache();
         let dismissed: Dismissed = dismiss::all_keys(&cache).into_iter().collect();
 
-        let menu = build(
-            Some(&cache),
-            &users(),
-            &jst(),
-            &[],
-            &dismissed,
-            LoginState::Off,
+        let menu = build_with(Some(&cache), &dismissed, &[], LoginState::Off, &home());
+
+        assert_eq!(menu.title, "@");
+        assert_eq!(
+            menu.entries[..4],
+            [
+                Entry::Header("Home 株式会社".into()),
+                Entry::NoItems,
+                Entry::Separator,
+                Entry::Info("取得 10/28 19:05".into()),
+            ]
         );
+    }
+
+    #[test]
+    fn says_nothing_when_no_workspace_is_known() {
+        let mut empty = cache();
+        empty.items.clear();
+
+        let menu = build_with(Some(&empty), &Dismissed::new(), &[], LoginState::Off, &[]);
 
         assert_eq!(menu.title, "@");
         assert_eq!(
@@ -207,88 +312,34 @@ mod tests {
     }
 
     #[test]
-    fn shows_bare_mark_when_empty() {
-        let mut empty = cache();
-        empty.items.clear();
-
-        let menu = build(
-            Some(&empty),
-            &users(),
-            &jst(),
-            &[],
-            &Dismissed::new(),
-            LoginState::Off,
-        );
-
-        assert_eq!(menu.title, "@");
-        assert_eq!(
-            menu.entries,
-            [
-                Entry::Info("メンションと DM はありません".into()),
-                Entry::Separator,
-                Entry::Info("取得 10/28 19:05".into()),
-                Entry::FetchNow,
-                Entry::LaunchAtLogin(LoginState::Off),
-                Entry::Separator,
-                Entry::Quit,
-            ]
-        );
-    }
-
-    #[test]
     fn shows_question_without_cache() {
-        let menu = build(
-            None,
-            &users(),
-            &jst(),
-            &[],
-            &Dismissed::new(),
-            LoginState::Off,
-        );
+        let menu = build_with(None, &Dismissed::new(), &[], LoginState::Off, &home());
 
         assert_eq!(menu.title, "@ ?");
         assert_eq!(
-            menu.entries,
+            menu.entries[..2],
             [
                 Entry::Info("キャッシュがありません".into()),
                 Entry::Separator,
-                Entry::FetchNow,
-                Entry::LaunchAtLogin(LoginState::Off),
-                Entry::Separator,
-                Entry::Quit,
             ]
         );
+        assert_eq!(menu.entries[2..], footer());
     }
 
     #[test]
     fn shows_failures_before_fetch_now() {
         let failures = ["取得に失敗：home（x）".to_owned()];
 
-        let menu = build(
-            None,
-            &users(),
-            &jst(),
-            &failures,
-            &Dismissed::new(),
-            LoginState::Off,
-        );
+        let menu = build_with(None, &Dismissed::new(), &failures, LoginState::Off, &home());
 
-        assert_eq!(
-            menu.entries[2..],
-            [
-                Entry::Info("取得に失敗：home（x）".into()),
-                Entry::FetchNow,
-                Entry::LaunchAtLogin(LoginState::Off),
-                Entry::Separator,
-                Entry::Quit,
-            ]
-        );
+        assert_eq!(menu.entries[2], Entry::Info("取得に失敗：home（x）".into()));
+        assert_eq!(menu.entries[3..], footer());
     }
 
     #[test]
     fn shows_login_state() {
         for login in [LoginState::On, LoginState::NeedsApproval] {
-            let menu = build(None, &users(), &jst(), &[], &Dismissed::new(), login);
+            let menu = build_with(None, &Dismissed::new(), &[], login, &home());
 
             assert!(menu.entries.contains(&Entry::LaunchAtLogin(login)));
         }

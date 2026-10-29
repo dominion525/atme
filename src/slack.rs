@@ -33,6 +33,7 @@ pub struct Client {
 #[derive(Debug, Deserialize)]
 pub struct AuthTest {
     pub user_id: String,
+    pub team: String,
 }
 
 #[derive(Debug, Deserialize)]
