@@ -7,6 +7,7 @@ mod dismiss;
 mod display;
 mod fetch;
 mod list;
+mod login;
 mod menu;
 mod notify;
 mod read;

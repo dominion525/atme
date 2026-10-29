@@ -425,9 +425,6 @@ mod tests {
             .iter()
             .map(|item| (item.ts.as_str(), item.text.as_str()))
             .collect();
-        assert_eq!(
-            keys,
-            [("1000.000001", "新しい本文"), ("900.000001", "")]
-        );
+        assert_eq!(keys, [("1000.000001", "新しい本文"), ("900.000001", "")]);
     }
 }

@@ -6,6 +6,7 @@ use chrono::TimeZone;
 use crate::dismiss;
 use crate::display;
 use crate::fetch::Report;
+use crate::login::LoginState;
 use crate::state::{Cache, Dismissed, Users};
 
 const MESSAGE_CHARS: usize = 50;
@@ -18,6 +19,7 @@ pub enum Entry {
     Separator,
     DismissAll,
     FetchNow,
+    LaunchAtLogin(LoginState),
     Quit,
 }
 
@@ -33,6 +35,7 @@ pub fn build<Tz: TimeZone>(
     tz: &Tz,
     failures: &[String],
     dismissed: &Dismissed,
+    login: LoginState,
 ) -> Menu
 where
     Tz::Offset: Display,
@@ -82,6 +85,7 @@ where
     };
     entries.extend(failures.iter().cloned().map(Entry::Info));
     entries.push(Entry::FetchNow);
+    entries.push(Entry::LaunchAtLogin(login));
     entries.push(Entry::Separator);
     entries.push(Entry::Quit);
     Menu { title, entries }
@@ -122,7 +126,14 @@ mod tests {
 
     #[test]
     fn lists_messages_with_count() {
-        let menu = build(Some(&cache()), &users(), &jst(), &[], &Dismissed::new());
+        let menu = build(
+            Some(&cache()),
+            &users(),
+            &jst(),
+            &[],
+            &Dismissed::new(),
+            LoginState::Off,
+        );
 
         assert_eq!(menu.title, "@ 2");
         assert_eq!(
@@ -140,6 +151,7 @@ mod tests {
                 Entry::DismissAll,
                 Entry::Info("取得 10/28 19:05".into()),
                 Entry::FetchNow,
+                Entry::LaunchAtLogin(LoginState::Off),
                 Entry::Separator,
                 Entry::Quit,
             ]
@@ -151,7 +163,14 @@ mod tests {
         let cache = cache();
         let dismissed: Dismissed = [cache.items[0].key()].into();
 
-        let menu = build(Some(&cache), &users(), &jst(), &[], &dismissed);
+        let menu = build(
+            Some(&cache),
+            &users(),
+            &jst(),
+            &[],
+            &dismissed,
+            LoginState::Off,
+        );
 
         assert_eq!(menu.title, "@ 1");
         assert!(matches!(
@@ -167,7 +186,14 @@ mod tests {
         let cache = cache();
         let dismissed: Dismissed = dismiss::all_keys(&cache).into_iter().collect();
 
-        let menu = build(Some(&cache), &users(), &jst(), &[], &dismissed);
+        let menu = build(
+            Some(&cache),
+            &users(),
+            &jst(),
+            &[],
+            &dismissed,
+            LoginState::Off,
+        );
 
         assert_eq!(menu.title, "@");
         assert_eq!(
@@ -185,7 +211,14 @@ mod tests {
         let mut empty = cache();
         empty.items.clear();
 
-        let menu = build(Some(&empty), &users(), &jst(), &[], &Dismissed::new());
+        let menu = build(
+            Some(&empty),
+            &users(),
+            &jst(),
+            &[],
+            &Dismissed::new(),
+            LoginState::Off,
+        );
 
         assert_eq!(menu.title, "@");
         assert_eq!(
@@ -195,6 +228,7 @@ mod tests {
                 Entry::Separator,
                 Entry::Info("取得 10/28 19:05".into()),
                 Entry::FetchNow,
+                Entry::LaunchAtLogin(LoginState::Off),
                 Entry::Separator,
                 Entry::Quit,
             ]
@@ -203,7 +237,14 @@ mod tests {
 
     #[test]
     fn shows_question_without_cache() {
-        let menu = build(None, &users(), &jst(), &[], &Dismissed::new());
+        let menu = build(
+            None,
+            &users(),
+            &jst(),
+            &[],
+            &Dismissed::new(),
+            LoginState::Off,
+        );
 
         assert_eq!(menu.title, "@ ?");
         assert_eq!(
@@ -212,6 +253,7 @@ mod tests {
                 Entry::Info("キャッシュがありません".into()),
                 Entry::Separator,
                 Entry::FetchNow,
+                Entry::LaunchAtLogin(LoginState::Off),
                 Entry::Separator,
                 Entry::Quit,
             ]
@@ -222,17 +264,34 @@ mod tests {
     fn shows_failures_before_fetch_now() {
         let failures = ["取得に失敗：home（x）".to_owned()];
 
-        let menu = build(None, &users(), &jst(), &failures, &Dismissed::new());
+        let menu = build(
+            None,
+            &users(),
+            &jst(),
+            &failures,
+            &Dismissed::new(),
+            LoginState::Off,
+        );
 
         assert_eq!(
             menu.entries[2..],
             [
                 Entry::Info("取得に失敗：home（x）".into()),
                 Entry::FetchNow,
+                Entry::LaunchAtLogin(LoginState::Off),
                 Entry::Separator,
                 Entry::Quit,
             ]
         );
+    }
+
+    #[test]
+    fn shows_login_state() {
+        for login in [LoginState::On, LoginState::NeedsApproval] {
+            let menu = build(None, &users(), &jst(), &[], &Dismissed::new(), login);
+
+            assert!(menu.entries.contains(&Entry::LaunchAtLogin(login)));
+        }
     }
 
     #[test]

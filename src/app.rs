@@ -10,13 +10,14 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Bool, ProtocolObject, Sel};
 use objc2::{define_class, msg_send, sel, AnyThread, DefinedClass, MainThreadOnly};
 use objc2_app_kit::{
-    NSApplication, NSMenu, NSMenuItem, NSStatusBar, NSStatusItem, NSVariableStatusItemLength,
-    NSWorkspace, NSWorkspaceDidWakeNotification,
+    NSApplication, NSControlStateValueOn, NSMenu, NSMenuItem, NSStatusBar, NSStatusItem,
+    NSVariableStatusItemLength, NSWorkspace, NSWorkspaceDidWakeNotification,
 };
 use objc2_foundation::{
     ns_string, MainThreadMarker, NSBundle, NSDictionary, NSError, NSNotification, NSObject,
     NSObjectProtocol, NSString, NSURL,
 };
+use objc2_service_management::SMAppService;
 use objc2_user_notifications::{
     UNAuthorizationOptions, UNNotificationResponse, UNUserNotificationCenter,
     UNUserNotificationCenterDelegate,
@@ -24,6 +25,7 @@ use objc2_user_notifications::{
 
 use crate::dismiss;
 use crate::fetch;
+use crate::login::{self, LoginState};
 use crate::menu::{self, Entry, Menu};
 use crate::notify::PERMALINK_KEY;
 use crate::scheduler;
@@ -107,6 +109,30 @@ define_class!(
             refresh();
         }
 
+        #[unsafe(method(toggleLogin:))]
+        fn toggle_login(&self, _sender: &NSMenuItem) {
+            let service = unsafe { SMAppService::mainAppService() };
+            let result = match login::action(login_state()) {
+                login::Action::Register => unsafe { service.registerAndReturnError() },
+                login::Action::Unregister => unsafe { service.unregisterAndReturnError() },
+                login::Action::OpenSettings => {
+                    unsafe { SMAppService::openSystemSettingsLoginItems() };
+                    Ok(())
+                }
+            };
+            if let Err(error) = result {
+                UI.with(|ui| {
+                    if let Some(ui) = ui.borrow_mut().as_mut() {
+                        ui.failures.push(format!(
+                            "ログイン時の起動を切り替えられませんでした（{}）",
+                            error.localizedDescription()
+                        ));
+                    }
+                });
+            }
+            refresh();
+        }
+
         #[unsafe(method(quit:))]
         fn quit(&self, _sender: &NSMenuItem) {
             NSApplication::sharedApplication(self.mtm()).terminate(None);
@@ -119,6 +145,10 @@ impl MenuTarget {
         let this = Self::alloc(mtm).set_ivars(trigger);
         unsafe { msg_send![super(this), init] }
     }
+}
+
+fn login_state() -> LoginState {
+    login::state(unsafe { SMAppService::mainAppService().status() })
 }
 
 pub fn in_app_bundle() -> bool {
@@ -204,7 +234,14 @@ fn refresh() {
     }
     UI.with(|ui| {
         if let Some(ui) = ui.borrow().as_ref() {
-            let model = menu::build(cache.as_ref(), &users, &Local, &ui.failures, &dismissed);
+            let model = menu::build(
+                cache.as_ref(),
+                &users,
+                &Local,
+                &ui.failures,
+                &dismissed,
+                login_state(),
+            );
             show(&ui.status_item, &model, &ui.target, mtm);
         }
     });
@@ -275,6 +312,18 @@ fn menu_item(entry: &Entry, target: &MenuTarget, mtm: MainThreadMarker) -> Retai
         }
         Entry::FetchNow => {
             let item = new_item("今すぐ取得", Some(sel!(fetchNow:)), mtm);
+            unsafe { item.setTarget(Some(target)) };
+            item
+        }
+        Entry::LaunchAtLogin(state) => {
+            let title = match state {
+                LoginState::NeedsApproval => "ログイン時に起動（システム設定で承認が必要）",
+                LoginState::On | LoginState::Off => "ログイン時に起動",
+            };
+            let item = new_item(title, Some(sel!(toggleLogin:)), mtm);
+            if *state == LoginState::On {
+                item.setState(NSControlStateValueOn);
+            }
             unsafe { item.setTarget(Some(target)) };
             item
         }
