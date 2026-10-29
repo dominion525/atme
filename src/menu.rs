@@ -55,6 +55,8 @@ pub enum Entry {
     DismissAll,
     Fetch(FetchButton),
     LaunchAtLogin(LoginState),
+    /// Sparkle の「アップデートを確認…」
+    CheckForUpdates,
     Quit,
 }
 
@@ -71,6 +73,8 @@ pub struct Inputs<'a> {
     pub failures: &'a [String],
     pub dismissed: &'a Dismissed,
     pub login: LoginState,
+    /// Sparkle を読み込めたか。読み込めたときだけ「アップデートを確認…」を出す
+    pub updates: bool,
     pub fetch: FetchButton,
     /// 設定ファイルに書かれた順のワークスペース（設定の name）
     pub workspaces: &'a [String],
@@ -147,6 +151,9 @@ where
     entries.extend(inputs.failures.iter().cloned().map(Entry::Info));
     entries.push(Entry::Fetch(inputs.fetch));
     entries.push(Entry::LaunchAtLogin(inputs.login));
+    if inputs.updates {
+        entries.push(Entry::CheckForUpdates);
+    }
     entries.push(Entry::Separator);
     entries.push(Entry::Quit);
     Menu { badge, entries }
@@ -202,6 +209,7 @@ mod tests {
                 failures,
                 dismissed,
                 login,
+                updates: false,
                 fetch: FetchButton::Ready,
                 workspaces,
             },
@@ -382,6 +390,7 @@ mod tests {
                     failures: &[],
                     dismissed: &Dismissed::new(),
                     login: LoginState::Off,
+                    updates: false,
                     fetch,
                     workspaces: &home(),
                 },
@@ -416,6 +425,39 @@ mod tests {
         assert_eq!(
             fetch_button(Phase::Idle, Some(Duration::from_millis(29_999)), gap),
             FetchButton::Cooldown(1)
+        );
+    }
+
+    #[test]
+    fn shows_check_for_updates_only_with_sparkle() {
+        let users = users();
+        let menu = build(
+            &Inputs {
+                cache: None,
+                users: &users,
+                failures: &[],
+                dismissed: &Dismissed::new(),
+                login: LoginState::Off,
+                updates: true,
+                fetch: FetchButton::Ready,
+                workspaces: &home(),
+            },
+            &jst(),
+        );
+
+        assert_eq!(
+            menu.entries[menu.entries.len() - 4..],
+            [
+                Entry::LaunchAtLogin(LoginState::Off),
+                Entry::CheckForUpdates,
+                Entry::Separator,
+                Entry::Quit,
+            ]
+        );
+        assert!(
+            !build_with(None, &Dismissed::new(), &[], LoginState::Off, &home())
+                .entries
+                .contains(&Entry::CheckForUpdates)
         );
     }
 

@@ -3,21 +3,21 @@ use std::ptr::NonNull;
 use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use block2::{DynBlock, RcBlock};
 use chrono::Local;
 use dispatch2::DispatchQueue;
-use objc2::rc::Retained;
-use objc2::runtime::{AnyObject, Bool, ProtocolObject, Sel};
-use objc2::{AnyThread, DefinedClass, MainThreadOnly, define_class, msg_send, sel};
+use objc2::rc::{Allocated, Retained};
+use objc2::runtime::{AnyClass, AnyObject, Bool, ProtocolObject, Sel};
+use objc2::{define_class, msg_send, sel, AnyThread, DefinedClass, MainThreadOnly};
 use objc2_app_kit::{
     NSApplication, NSCellImagePosition, NSControlStateValueOn, NSImage, NSMenu, NSMenuDelegate,
     NSMenuItem, NSStatusBar, NSStatusItem, NSVariableStatusItemLength, NSWorkspace,
     NSWorkspaceDidWakeNotification,
 };
 use objc2_foundation::{
-    MainThreadMarker, NSBundle, NSDictionary, NSError, NSNotification, NSObject, NSObjectProtocol,
-    NSRunLoop, NSRunLoopCommonModes, NSSize, NSString, NSTimer, NSURL, ns_string,
+    ns_string, MainThreadMarker, NSBundle, NSDictionary, NSError, NSNotification, NSObject,
+    NSObjectProtocol, NSRunLoop, NSRunLoopCommonModes, NSSize, NSString, NSTimer, NSURL,
 };
 use objc2_service_management::SMAppService;
 use objc2_user_notifications::{
@@ -54,6 +54,8 @@ struct Ui {
     animation: Option<Retained<NSTimer>>,
     /// 取得が終わり、縦に戻る絵まで回してから止めるところ
     stopping: bool,
+    /// Sparkle の SPUStandardUpdaterController。読み込めなかったときは None
+    updater: Option<Retained<AnyObject>>,
 }
 
 /// メニューバーの絵。atme.app の Resources から読む。読めなければ文字の @ で代わりにする
@@ -206,6 +208,29 @@ pub fn in_app_bundle() -> bool {
     NSBundle::mainBundle().bundleIdentifier().is_some()
 }
 
+/// atme.app の Contents/Frameworks から Sparkle を読み込み、自動アップデートを始める。
+/// ビルド時にはリンクしないので、Sparkle の無いところ（テストや .app の外）でも atme は動く
+fn start_updater() -> Option<Retained<AnyObject>> {
+    let frameworks = NSBundle::mainBundle().privateFrameworksPath()?;
+    let path = NSString::from_str(&format!("{frameworks}/Sparkle.framework"));
+    let bundle = NSBundle::bundleWithPath(&path)?;
+    if !unsafe { bundle.load() } {
+        eprintln!("Sparkle.framework を読み込めませんでした");
+        return None;
+    }
+    let class = AnyClass::get(c"SPUStandardUpdaterController")?;
+    let allocated: Allocated<AnyObject> = unsafe { msg_send![class, alloc] };
+    let no_delegate: Option<&AnyObject> = None;
+    unsafe {
+        msg_send![
+            allocated,
+            initWithStartingUpdater: true,
+            updaterDelegate: no_delegate,
+            userDriverDelegate: no_delegate
+        ]
+    }
+}
+
 pub fn run() -> Result<()> {
     if !in_app_bundle() {
         bail!("atme.app の外から実行したため、常駐できません");
@@ -261,6 +286,7 @@ pub fn run() -> Result<()> {
             frame: 0,
             animation: None,
             stopping: false,
+            updater: start_updater(),
         })
     });
     refresh();
@@ -395,6 +421,7 @@ fn refresh() {
                     failures: &ui.failures,
                     dismissed: &dismissed,
                     login: login_state(),
+                    updates: ui.updater.is_some(),
                     fetch: menu::fetch_button(
                         ui.phase,
                         ui.last_fetched.map(|finished| finished.elapsed()),
@@ -441,12 +468,12 @@ fn show(ui: &mut Ui, model: &Menu, mtm: MainThreadMarker) {
     update_icon(ui, mtm);
     ui.menu.removeAllItems();
     for entry in &model.entries {
-        ui.menu.addItem(&menu_item(entry, &ui.target, mtm));
+        ui.menu.addItem(&menu_item(entry, ui, mtm));
     }
 }
 
-fn menu_item(entry: &Entry, target: &MenuTarget, mtm: MainThreadMarker) -> Retained<NSMenuItem> {
-    let target: &AnyObject = target;
+fn menu_item(entry: &Entry, ui: &Ui, mtm: MainThreadMarker) -> Retained<NSMenuItem> {
+    let target: &AnyObject = &ui.target;
     match entry {
         Entry::Separator => NSMenuItem::separatorItem(mtm),
         Entry::Info(text) => {
@@ -503,6 +530,14 @@ fn menu_item(entry: &Entry, target: &MenuTarget, mtm: MainThreadMarker) -> Retai
                 item.setState(NSControlStateValueOn);
             }
             unsafe { item.setTarget(Some(target)) };
+            item
+        }
+        Entry::CheckForUpdates => {
+            // SPUStandardUpdaterController の checkForUpdates: を直接呼ばせる
+            let item = new_item("アップデートを確認…", Some(sel!(checkForUpdates:)), mtm);
+            if let Some(updater) = &ui.updater {
+                unsafe { item.setTarget(Some(updater)) };
+            }
             item
         }
         Entry::Quit => {

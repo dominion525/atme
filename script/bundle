@@ -2,16 +2,33 @@
 # リリースビルドから target/release/atme.app を作って署名する。
 # ATME_SIGN_IDENTITY に証明書の名前（一部でよい）を入れるとその証明書で、無ければ ad-hoc で署名する。
 # アイコンは assets/icon.svg から作るので、rsvg-convert（brew install librsvg）が要る。
+# 自動アップデートの Sparkle は、配布物をダウンロードして SHA256 を照らし合わせてから組み込む。
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 version=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$root/Cargo.toml" | head -n 1)
 app="$root/target/release/atme.app"
 iconset="$root/target/release/atme.iconset"
+identity="${ATME_SIGN_IDENTITY:--}"
+
+sparkle_version=2.10.1
+sparkle_sha256=1a856d2a9edb8e628de88121d7be04cf0e2167f8641650b78fca00b14244cf27
+sparkle_dir="$root/target/sparkle-$sparkle_version"
+# appcast の置き場所が決まるまでの仮の URL
+feed_url="https://example.invalid/atme/appcast.xml"
 
 if ! command -v rsvg-convert > /dev/null; then
   echo "rsvg-convert が見つかりません。brew install librsvg で入れてください" >&2
   exit 1
+fi
+
+if [ ! -d "$sparkle_dir/Sparkle.framework" ]; then
+  archive="$root/target/Sparkle-$sparkle_version.tar.xz"
+  curl -fL -o "$archive" "https://github.com/sparkle-project/Sparkle/releases/download/$sparkle_version/Sparkle-$sparkle_version.tar.xz"
+  echo "$sparkle_sha256  $archive" | shasum -a 256 -c -
+  rm -rf "$sparkle_dir"
+  mkdir -p "$sparkle_dir"
+  tar -xJf "$archive" -C "$sparkle_dir"
 fi
 
 cargo build --release --manifest-path "$root/Cargo.toml"
@@ -67,9 +84,21 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <string>$version</string>
   <key>LSUIElement</key>
   <true/>
+  <key>SUFeedURL</key>
+  <string>$feed_url</string>
 </dict>
 </plist>
 PLIST
 
-codesign --force --options runtime --sign "${ATME_SIGN_IDENTITY:--}" "$app"
+# Sparkle の部品は、公式の手順どおり --deep を使わずに 1 つずつ署名してから、.app 全体を署名する
+mkdir -p "$app/Contents/Frameworks"
+ditto "$sparkle_dir/Sparkle.framework" "$app/Contents/Frameworks/Sparkle.framework"
+sparkle="$app/Contents/Frameworks/Sparkle.framework/Versions/B"
+codesign --force --options runtime --sign "$identity" "$sparkle/XPCServices/Installer.xpc"
+codesign --force --options runtime --sign "$identity" --preserve-metadata=entitlements "$sparkle/XPCServices/Downloader.xpc"
+codesign --force --options runtime --sign "$identity" "$sparkle/Autoupdate"
+codesign --force --options runtime --sign "$identity" "$sparkle/Updater.app"
+codesign --force --options runtime --sign "$identity" "$app/Contents/Frameworks/Sparkle.framework"
+
+codesign --force --options runtime --sign "$identity" "$app"
 echo "$app"
