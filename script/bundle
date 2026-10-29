@@ -25,6 +25,27 @@ for size in 16 32 128 256 512; do
   rsvg-convert -w $((size * 2)) -h $((size * 2)) "$root/assets/icon.svg" -o "$iconset/icon_${size}x${size}@2x.png"
 done
 iconutil --convert icns --output "$app/Contents/Resources/atme.icns" "$iconset"
+
+# メニューバーの絵（テンプレート画像）。表示は 18pt、Retina 用に @2x も作る。
+# 取得中の絵は、いつもの絵を中心で 30 度ずつ時計回りに回した 12 枚（menubar-rotate-0 が回す前の絵）
+frames="$root/target/release/menubar-frames"
+rm -rf "$frames"
+mkdir -p "$frames"
+glyph=$(sed -n '/<path/p' "$root/assets/menubar/idle.svg")
+for step in $(seq 0 11); do
+  cat > "$frames/rotate-$step.svg" <<SVG
+<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 36 36">
+<g transform="rotate($((step * 30)) 18 18)">
+$glyph
+</g>
+</svg>
+SVG
+done
+for svg in "$root/assets/menubar/idle.svg" "$frames"/rotate-*.svg; do
+  name="menubar-$(basename "$svg" .svg)"
+  rsvg-convert -w 18 -h 18 "$svg" -o "$app/Contents/Resources/$name.png"
+  rsvg-convert -w 36 -h 36 "$svg" -o "$app/Contents/Resources/$name@2x.png"
+done
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

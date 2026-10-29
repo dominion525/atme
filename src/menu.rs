@@ -33,7 +33,8 @@ pub enum Entry {
 
 #[derive(Debug, PartialEq)]
 pub struct Menu {
-    pub title: String,
+    /// メニューバーの絵の右に出す文字（件数。0 件なら空、キャッシュが無ければ ?）
+    pub badge: String,
     pub entries: Vec<Entry>,
 }
 
@@ -53,11 +54,11 @@ where
     Tz::Offset: Display,
 {
     let mut entries = Vec::new();
-    let title = match inputs.cache {
+    let badge = match inputs.cache {
         None => {
             entries.push(Entry::Info("キャッシュがありません".into()));
             entries.push(Entry::Separator);
-            "@ ?".into()
+            "?".into()
         }
         Some(cache) => {
             let items = dismiss::visible(cache, inputs.dismissed);
@@ -110,9 +111,9 @@ where
                 display::format_time(tz, cache.fetched_at, "%m/%d %H:%M")
             )));
             if items.is_empty() {
-                "@".into()
+                String::new()
             } else {
-                format!("@ {}", items.len())
+                items.len().to_string()
             }
         }
     };
@@ -121,7 +122,7 @@ where
     entries.push(Entry::LaunchAtLogin(inputs.login));
     entries.push(Entry::Separator);
     entries.push(Entry::Quit);
-    Menu { title, entries }
+    Menu { badge, entries }
 }
 
 pub fn failure_lines(result: &anyhow::Result<Vec<Report>>) -> Vec<String> {
@@ -204,7 +205,7 @@ mod tests {
             &home(),
         );
 
-        assert_eq!(menu.title, "@ 2");
+        assert_eq!(menu.badge, "2");
         assert_eq!(
             menu.entries[..6],
             [
@@ -252,7 +253,7 @@ mod tests {
         let menu = build_with(Some(&cache()), &Dismissed::new(), &[], LoginState::Off, &[]);
 
         assert_eq!(menu.entries[0], Entry::Header("Home 株式会社".into()));
-        assert_eq!(menu.title, "@ 2");
+        assert_eq!(menu.badge, "2");
     }
 
     #[test]
@@ -262,7 +263,7 @@ mod tests {
 
         let menu = build_with(Some(&cache), &dismissed, &[], LoginState::Off, &home());
 
-        assert_eq!(menu.title, "@ 1");
+        assert_eq!(menu.badge, "1");
         assert_eq!(
             menu.entries[..4],
             [
@@ -284,7 +285,7 @@ mod tests {
 
         let menu = build_with(Some(&cache), &dismissed, &[], LoginState::Off, &home());
 
-        assert_eq!(menu.title, "@");
+        assert_eq!(menu.badge, "");
         assert_eq!(
             menu.entries[..4],
             [
@@ -303,7 +304,7 @@ mod tests {
 
         let menu = build_with(Some(&empty), &Dismissed::new(), &[], LoginState::Off, &[]);
 
-        assert_eq!(menu.title, "@");
+        assert_eq!(menu.badge, "");
         assert_eq!(
             menu.entries[..3],
             [
@@ -318,7 +319,7 @@ mod tests {
     fn shows_question_without_cache() {
         let menu = build_with(None, &Dismissed::new(), &[], LoginState::Off, &home());
 
-        assert_eq!(menu.title, "@ ?");
+        assert_eq!(menu.badge, "?");
         assert_eq!(
             menu.entries[..2],
             [
