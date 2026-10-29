@@ -1,12 +1,12 @@
 use anyhow::{bail, Context, Result};
 use reqwest::blocking::Client as HttpClient;
-use reqwest::header::COOKIE;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 
-use crate::config::Workspace;
-use crate::credentials::Credentials;
+use crate::credentials::Token;
 use crate::read::{ChannelState, ReadSource, ThreadState};
+
+const API_URL: &str = "https://slack.com/api";
 
 impl ReadSource for Client {
     fn channel(&self, channel: &str) -> Option<ChannelState> {
@@ -26,8 +26,7 @@ impl ReadSource for Client {
 
 pub struct Client {
     http: HttpClient,
-    base_url: String,
-    credentials: Credentials,
+    token: Token,
 }
 
 #[derive(Debug, Deserialize)]
@@ -136,19 +135,11 @@ struct ReplyMessage {
 }
 
 impl Client {
-    pub fn new(workspace: &Workspace, credentials: Credentials) -> Result<Self> {
-        let base_url = match credentials {
-            Credentials::Token(_) => "https://slack.com/api".to_owned(),
-            Credentials::Session { .. } => format!("https://{}.slack.com/api", workspace.domain),
-        };
+    pub fn new(token: Token) -> Result<Self> {
         let http = HttpClient::builder()
             .build()
             .context("HTTP クライアントを作れませんでした")?;
-        Ok(Self {
-            http,
-            base_url,
-            credentials,
-        })
+        Ok(Self { http, token })
     }
 
     pub fn auth_test(&self) -> Result<AuthTest> {
@@ -205,19 +196,11 @@ impl Client {
     }
 
     fn call<T: DeserializeOwned>(&self, method: &str, params: &[(&str, &str)]) -> Result<T> {
-        let url = format!("{}/{method}", self.base_url);
-        let request = match &self.credentials {
-            Credentials::Token(token) => self.http.post(&url).bearer_auth(token).form(params),
-            Credentials::Session { token, cookie } => {
-                let mut form = vec![("token", token.as_str())];
-                form.extend_from_slice(params);
-                self.http
-                    .post(&url)
-                    .header(COOKIE, format!("d={cookie}"))
-                    .form(&form)
-            }
-        };
-        let response = request
+        let response = self
+            .http
+            .post(format!("{API_URL}/{method}"))
+            .bearer_auth(self.token.as_str())
+            .form(params)
             .send()
             .with_context(|| format!("{method} を呼び出せませんでした"))?;
         let status = response.status();

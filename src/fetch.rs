@@ -4,7 +4,7 @@ use anyhow::{bail, Result};
 use chrono::{Local, NaiveDate, TimeDelta};
 
 use crate::config::{Config, Workspace};
-use crate::credentials::Credentials;
+use crate::credentials::Token;
 use crate::notify;
 use crate::read;
 use crate::slack::{Client, Message};
@@ -125,7 +125,7 @@ fn fetch_workspace(
     names: &mut BTreeMap<String, String>,
     previous: Vec<Item>,
 ) -> Result<(String, Vec<Item>)> {
-    let client = Client::new(workspace, Credentials::load(workspace)?)?;
+    let client = Client::new(Token::load(workspace)?)?;
     let auth = client.auth_test()?;
     let me = auth.user_id;
     let mut messages = client.search_messages(&format!("<@{me}> after:{after}"))?;

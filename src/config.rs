@@ -16,16 +16,8 @@ pub struct Config {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Workspace {
+    /// Keychain の account（`<name>/token`）や記録のキーに使う名前
     pub name: String,
-    pub domain: String,
-    pub auth: Auth,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Auth {
-    Token,
-    Session,
 }
 
 fn default_days() -> u32 {
@@ -72,13 +64,9 @@ mod tests {
 
             [[workspace]]
             name = "home"
-            domain = "home-team"
-            auth = "token"
 
             [[workspace]]
             name = "work"
-            domain = "work-corp"
-            auth = "session"
             "#,
         )
         .unwrap();
@@ -86,9 +74,7 @@ mod tests {
         assert_eq!(config.days, 3);
         assert_eq!(config.workspace.len(), 2);
         assert_eq!(config.workspace[0].name, "home");
-        assert_eq!(config.workspace[0].domain, "home-team");
-        assert_eq!(config.workspace[0].auth, Auth::Token);
-        assert_eq!(config.workspace[1].auth, Auth::Session);
+        assert_eq!(config.workspace[1].name, "work");
     }
 
     #[test]
@@ -97,8 +83,6 @@ mod tests {
             r#"
             [[workspace]]
             name = "home"
-            domain = "home-team"
-            auth = "token"
             "#,
         )
         .unwrap();
@@ -109,16 +93,15 @@ mod tests {
     #[test]
     fn rejects_unknown_keys() {
         assert!(Config::parse("dayz = 3").is_err());
-        assert!(Config::parse(
-            r#"
-                [[workspace]]
-                name = "home"
-                domain = "home-team"
-                auth = "token"
-                token = "xoxp-"
-                "#,
-        )
-        .is_err());
+        // token を設定に書かせない。session 方式で使っていた domain と auth も、もう受け付けない
+        for key in [
+            r#"token = "xoxp-""#,
+            r#"domain = "home-team""#,
+            r#"auth = "token""#,
+        ] {
+            let text = format!("[[workspace]]\nname = \"home\"\n{key}\n");
+            assert!(Config::parse(&text).is_err(), "{key}");
+        }
     }
 
     #[test]
@@ -132,13 +115,9 @@ mod tests {
             r#"
             [[workspace]]
             name = "home"
-            domain = "home-team"
-            auth = "token"
 
             [[workspace]]
             name = "home"
-            domain = "other-team"
-            auth = "session"
             "#,
         )
         .unwrap_err();

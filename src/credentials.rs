@@ -3,34 +3,26 @@ use std::process::Command;
 
 use anyhow::{bail, Context, Result};
 
-use crate::config::{Auth, Workspace};
+use crate::config::Workspace;
 
 const SERVICE: &str = "atme";
 
-pub enum Credentials {
-    Token(String),
-    Session { token: String, cookie: String },
-}
+/// Slack の user token（xoxp-）。表示するときは値を伏せる
+pub struct Token(String);
 
-impl fmt::Debug for Credentials {
+impl fmt::Debug for Token {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Credentials::Token(_) => f.write_str("Token(***)"),
-            Credentials::Session { .. } => f.write_str("Session { token: ***, cookie: *** }"),
-        }
+        f.write_str("Token(***)")
     }
 }
 
-impl Credentials {
+impl Token {
     pub fn load(workspace: &Workspace) -> Result<Self> {
-        let token = read(&format!("{}/token", workspace.name))?;
-        match workspace.auth {
-            Auth::Token => Ok(Credentials::Token(token)),
-            Auth::Session => {
-                let cookie = read(&format!("{}/cookie", workspace.name))?;
-                Ok(Credentials::Session { token, cookie })
-            }
-        }
+        Ok(Self(read(&format!("{}/token", workspace.name))?))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
 }
 
@@ -48,4 +40,14 @@ fn read(account: &str) -> Result<String> {
     let value = String::from_utf8(output.stdout)
         .with_context(|| format!("Keychain の account={account} の値が UTF-8 ではありません"))?;
     Ok(value.trim_end_matches('\n').to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn debug_hides_the_value() {
+        assert_eq!(format!("{:?}", Token("xoxp-secret".into())), "Token(***)");
+    }
 }
