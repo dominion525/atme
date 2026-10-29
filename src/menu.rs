@@ -3,9 +3,10 @@ use std::fmt::Display;
 
 use chrono::TimeZone;
 
+use crate::dismiss;
 use crate::display;
 use crate::fetch::Report;
-use crate::state::{Cache, Users};
+use crate::state::{Cache, Dismissed, Users};
 
 const MESSAGE_CHARS: usize = 50;
 const FAILURE_CHARS: usize = 60;
@@ -15,6 +16,7 @@ pub enum Entry {
     Message { label: String, permalink: String },
     Info(String),
     Separator,
+    DismissAll,
     FetchNow,
     Quit,
 }
@@ -30,6 +32,7 @@ pub fn build<Tz: TimeZone>(
     users: &Users,
     tz: &Tz,
     failures: &[String],
+    dismissed: &Dismissed,
 ) -> Menu
 where
     Tz::Offset: Display,
@@ -43,7 +46,8 @@ where
         }
         Some(cache) => {
             let empty = BTreeMap::new();
-            entries.extend(cache.items.iter().map(|item| {
+            let items = dismiss::visible(cache, dismissed);
+            entries.extend(items.iter().map(|item| {
                 let names = users.get(&item.workspace).unwrap_or(&empty);
                 let sender = match &item.user_name {
                     Some(name) => format!("  {name}"),
@@ -58,18 +62,21 @@ where
                     permalink: item.permalink.clone(),
                 }
             }));
-            if cache.items.is_empty() {
+            if items.is_empty() {
                 entries.push(Entry::Info("メンションと DM はありません".into()));
             }
             entries.push(Entry::Separator);
+            if !items.is_empty() {
+                entries.push(Entry::DismissAll);
+            }
             entries.push(Entry::Info(format!(
                 "取得 {}",
                 display::format_time(tz, cache.fetched_at, "%m/%d %H:%M")
             )));
-            if cache.items.is_empty() {
+            if items.is_empty() {
                 "@".into()
             } else {
-                format!("@ {}", cache.items.len())
+                format!("@ {}", items.len())
             }
         }
     };
@@ -115,7 +122,7 @@ mod tests {
 
     #[test]
     fn lists_messages_with_count() {
-        let menu = build(Some(&cache()), &users(), &jst(), &[]);
+        let menu = build(Some(&cache()), &users(), &jst(), &[], &Dismissed::new());
 
         assert_eq!(menu.title, "@ 2");
         assert_eq!(
@@ -130,6 +137,7 @@ mod tests {
                     permalink: "https://example.slack.com/archives/C1/p1793178000.000200".into(),
                 },
                 Entry::Separator,
+                Entry::DismissAll,
                 Entry::Info("取得 10/28 19:05".into()),
                 Entry::FetchNow,
                 Entry::Separator,
@@ -139,11 +147,45 @@ mod tests {
     }
 
     #[test]
+    fn hides_dismissed_from_list_and_count() {
+        let cache = cache();
+        let dismissed: Dismissed = [cache.items[0].key()].into();
+
+        let menu = build(Some(&cache), &users(), &jst(), &[], &dismissed);
+
+        assert_eq!(menu.title, "@ 1");
+        assert!(matches!(
+            &menu.entries[0],
+            Entry::Message { label, .. } if label == "home / #general: 本文"
+        ));
+        assert_eq!(menu.entries[1], Entry::Separator);
+        assert_eq!(menu.entries[2], Entry::DismissAll);
+    }
+
+    #[test]
+    fn all_dismissed_looks_empty() {
+        let cache = cache();
+        let dismissed: Dismissed = dismiss::all_keys(&cache).into_iter().collect();
+
+        let menu = build(Some(&cache), &users(), &jst(), &[], &dismissed);
+
+        assert_eq!(menu.title, "@");
+        assert_eq!(
+            menu.entries[..3],
+            [
+                Entry::Info("メンションと DM はありません".into()),
+                Entry::Separator,
+                Entry::Info("取得 10/28 19:05".into()),
+            ]
+        );
+    }
+
+    #[test]
     fn shows_bare_mark_when_empty() {
         let mut empty = cache();
         empty.items.clear();
 
-        let menu = build(Some(&empty), &users(), &jst(), &[]);
+        let menu = build(Some(&empty), &users(), &jst(), &[], &Dismissed::new());
 
         assert_eq!(menu.title, "@");
         assert_eq!(
@@ -161,7 +203,7 @@ mod tests {
 
     #[test]
     fn shows_question_without_cache() {
-        let menu = build(None, &users(), &jst(), &[]);
+        let menu = build(None, &users(), &jst(), &[], &Dismissed::new());
 
         assert_eq!(menu.title, "@ ?");
         assert_eq!(
@@ -180,7 +222,7 @@ mod tests {
     fn shows_failures_before_fetch_now() {
         let failures = ["取得に失敗：home（x）".to_owned()];
 
-        let menu = build(None, &users(), &jst(), &failures);
+        let menu = build(None, &users(), &jst(), &failures, &Dismissed::new());
 
         assert_eq!(
             menu.entries[2..],

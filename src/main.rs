@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 mod app;
 mod config;
 mod credentials;
+mod dismiss;
 mod display;
 mod fetch;
 mod list;

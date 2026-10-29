@@ -177,9 +177,7 @@ mod tests {
         assert_eq!(content.body().to_string(), "本文");
         assert!(content.sound().is_some());
         assert_eq!(
-            crate::app::permalink(&content.userInfo())
-                .and_then(|url| url.absoluteString())
-                .map(|url| url.to_string()),
+            crate::app::permalink(&content.userInfo()),
             Some("https://example.slack.com/archives/C1/p1".into())
         );
     }

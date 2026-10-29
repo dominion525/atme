@@ -22,17 +22,19 @@ use objc2_user_notifications::{
     UNUserNotificationCenterDelegate,
 };
 
+use crate::dismiss;
 use crate::fetch;
 use crate::menu::{self, Entry, Menu};
 use crate::notify::PERMALINK_KEY;
 use crate::scheduler;
-use crate::state::Store;
+use crate::state::{Cache, SeenKey, Store};
 
 const FETCH_INTERVAL: Duration = Duration::from_secs(300);
 
 struct Ui {
     status_item: Retained<NSStatusItem>,
     target: Retained<MenuTarget>,
+    failures: Vec<String>,
 }
 
 thread_local! {
@@ -57,8 +59,9 @@ define_class!(
             completion_handler: &DynBlock<dyn Fn()>,
         ) {
             let info = response.notification().request().content().userInfo();
-            if let Some(url) = permalink(&info) {
-                NSWorkspace::sharedWorkspace().openURL(&url);
+            if let Some(permalink) = permalink(&info) {
+                // 記録の書き込みとメニューの作り直しはメインスレッドで行う
+                DispatchQueue::main().exec_async(move || open_and_dismiss(&permalink));
             }
             completion_handler.call(());
         }
@@ -93,9 +96,15 @@ define_class!(
 
         #[unsafe(method(openPermalink:))]
         fn open_permalink(&self, sender: &NSMenuItem) {
-            if let Some(url) = sender.representedObject().and_then(url_from) {
-                NSWorkspace::sharedWorkspace().openURL(&url);
+            if let Some(permalink) = sender.representedObject().and_then(text_from) {
+                open_and_dismiss(&permalink);
             }
+        }
+
+        #[unsafe(method(dismissAll:))]
+        fn dismiss_all(&self, _sender: &NSMenuItem) {
+            dismiss_with(dismiss::all_keys);
+            refresh();
         }
 
         #[unsafe(method(quit:))]
@@ -129,7 +138,7 @@ pub fn run() -> Result<()> {
 
     let (trigger, _worker) = scheduler::spawn(FETCH_INTERVAL, || {
         let failures = menu::failure_lines(&fetch::fetch_once());
-        DispatchQueue::main().exec_async(move || refresh(&failures));
+        DispatchQueue::main().exec_async(move || on_fetched(failures));
     });
     let target = MenuTarget::new(mtm, trigger);
     let observer: &AnyObject = &target;
@@ -149,15 +158,26 @@ pub fn run() -> Result<()> {
         *ui.borrow_mut() = Some(Ui {
             status_item,
             target,
+            failures: Vec::new(),
         })
     });
-    refresh(&[]);
+    refresh();
 
     app.run();
     Ok(())
 }
 
-fn refresh(failures: &[String]) {
+fn on_fetched(failures: Vec<String>) {
+    UI.with(|ui| {
+        if let Some(ui) = ui.borrow_mut().as_mut() {
+            ui.failures = failures;
+        }
+    });
+    refresh();
+}
+
+/// キャッシュと記録を読み直してメニューを作り直す。キャッシュから消えた分の記録はここで捨てる
+fn refresh() {
     let Some(mtm) = MainThreadMarker::new() else {
         return;
     };
@@ -169,12 +189,52 @@ fn refresh(failures: &[String]) {
         .as_ref()
         .and_then(|store| store.load_users().ok().flatten())
         .unwrap_or_default();
-    let model = menu::build(cache.as_ref(), &users, &Local, failures);
+    let mut dismissed = store
+        .as_ref()
+        .and_then(|store| store.load_dismissed().ok().flatten())
+        .unwrap_or_default();
+    if let (Some(store), Some(cache)) = (store.as_ref(), cache.as_ref()) {
+        let pruned = dismiss::prune(&dismissed, cache);
+        if pruned != dismissed {
+            if let Err(error) = store.save_dismissed(&pruned) {
+                eprintln!("{error:#}");
+            }
+            dismissed = pruned;
+        }
+    }
     UI.with(|ui| {
         if let Some(ui) = ui.borrow().as_ref() {
+            let model = menu::build(cache.as_ref(), &users, &Local, &ui.failures, &dismissed);
             show(&ui.status_item, &model, &ui.target, mtm);
         }
     });
+}
+
+fn open_and_dismiss(permalink: &str) {
+    if let Some(url) = NSURL::URLWithString(&NSString::from_str(permalink)) {
+        NSWorkspace::sharedWorkspace().openURL(&url);
+    }
+    dismiss_with(|cache| {
+        dismiss::key_for_permalink(cache, permalink)
+            .into_iter()
+            .collect()
+    });
+    refresh();
+}
+
+/// 選んだ項目を記録に足して保存する。メインスレッドからだけ呼ぶ
+fn dismiss_with(select: impl FnOnce(&Cache) -> Vec<SeenKey>) {
+    let Ok(store) = Store::open() else {
+        return;
+    };
+    let Some(cache) = store.load_cache().ok().flatten() else {
+        return;
+    };
+    let mut dismissed = store.load_dismissed().ok().flatten().unwrap_or_default();
+    dismissed.extend(select(&cache));
+    if let Err(error) = store.save_dismissed(&dismiss::prune(&dismissed, &cache)) {
+        eprintln!("{error:#}");
+    }
 }
 
 fn show(status_item: &NSStatusItem, model: &Menu, target: &MenuTarget, mtm: MainThreadMarker) {
@@ -208,6 +268,11 @@ fn menu_item(entry: &Entry, target: &MenuTarget, mtm: MainThreadMarker) -> Retai
             }
             item
         }
+        Entry::DismissAll => {
+            let item = new_item("すべて既読にする", Some(sel!(dismissAll:)), mtm);
+            unsafe { item.setTarget(Some(target)) };
+            item
+        }
         Entry::FetchNow => {
             let item = new_item("今すぐ取得", Some(sel!(fetchNow:)), mtm);
             unsafe { item.setTarget(Some(target)) };
@@ -232,16 +297,14 @@ fn new_item(title: &str, action: Option<Sel>, mtm: MainThreadMarker) -> Retained
     }
 }
 
-pub fn permalink(info: &NSDictionary) -> Option<Retained<NSURL>> {
-    url_from(info.objectForKey(&NSString::from_str(PERMALINK_KEY))?)
+pub fn permalink(info: &NSDictionary) -> Option<String> {
+    text_from(info.objectForKey(&NSString::from_str(PERMALINK_KEY))?)
 }
 
-fn url_from(value: Retained<AnyObject>) -> Option<Retained<NSURL>> {
-    let value = value.downcast::<NSString>().ok()?;
-    if value.length() == 0 {
-        return None;
-    }
-    NSURL::URLWithString(&value)
+/// 文字列のオブジェクトなら、その文字列を返す。空文字は無いものとして扱う
+fn text_from(value: Retained<AnyObject>) -> Option<String> {
+    let value = value.downcast::<NSString>().ok()?.to_string();
+    (!value.is_empty()).then_some(value)
 }
 
 fn request_authorization(center: &UNUserNotificationCenter) {
@@ -266,17 +329,12 @@ mod tests {
     use super::*;
     use crate::notify::user_info;
 
-    fn absolute(url: Option<Retained<NSURL>>) -> Option<String> {
-        url.and_then(|url| url.absoluteString())
-            .map(|url| url.to_string())
-    }
-
     #[test]
     fn reads_permalink_written_by_notify() {
         let info = user_info("https://example.slack.com/archives/C1/p1");
 
         assert_eq!(
-            absolute(permalink(&info)).as_deref(),
+            permalink(&info).as_deref(),
             Some("https://example.slack.com/archives/C1/p1")
         );
     }
@@ -292,18 +350,18 @@ mod tests {
     }
 
     #[test]
-    fn url_from_menu_item_object() {
+    fn text_from_menu_item_object() {
         let string: Retained<AnyObject> =
             NSString::from_str("https://example.slack.com/archives/C1/p1")
                 .into_super()
                 .into_super();
         assert_eq!(
-            absolute(url_from(string)).as_deref(),
+            text_from(string).as_deref(),
             Some("https://example.slack.com/archives/C1/p1")
         );
 
         let object: Retained<AnyObject> = NSObject::new().into_super();
-        assert!(url_from(object).is_none());
+        assert!(text_from(object).is_none());
     }
 
     #[test]

@@ -17,6 +17,9 @@ pub struct SeenKey {
 
 pub type Seen = BTreeSet<SeenKey>;
 
+/// atme から開いたもの・「すべて既読にする」で消したもの
+pub type Dismissed = BTreeSet<SeenKey>;
+
 pub type Users = BTreeMap<String, BTreeMap<String, String>>;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -102,6 +105,14 @@ impl Store {
 
     pub fn save_users(&self, users: &Users) -> Result<()> {
         write_json(&self.dir.join("users.json"), users)
+    }
+
+    pub fn load_dismissed(&self) -> Result<Option<Dismissed>> {
+        read_json(&self.dir.join("dismissed.json"))
+    }
+
+    pub fn save_dismissed(&self, dismissed: &Dismissed) -> Result<()> {
+        write_json(&self.dir.join("dismissed.json"), dismissed)
     }
 }
 
