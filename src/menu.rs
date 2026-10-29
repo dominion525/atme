@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::fmt::Display;
+use std::time::Duration;
 
 use chrono::TimeZone;
 
@@ -12,6 +13,32 @@ use crate::state::{Cache, Dismissed, Users};
 
 const MESSAGE_CHARS: usize = 50;
 const FAILURE_CHARS: usize = 60;
+
+/// メニューの「今すぐ取得」の行の状態
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FetchButton {
+    /// 押せる。押せばすぐ取得する
+    Ready,
+    /// 前回の取得から間があいていないので押せない。あと何秒で押せるか
+    Cooldown(u64),
+    /// 自動の取得（スリープからの復帰など）が、間があくのを待っている
+    Waiting,
+    Fetching,
+}
+
+/// 取得の状態と、前回の取得が終わってからの時間から、行の状態を決める
+pub fn fetch_button(phase: Phase, since_last: Option<Duration>, gap: Duration) -> FetchButton {
+    match phase {
+        Phase::Fetching => FetchButton::Fetching,
+        Phase::Waiting => FetchButton::Waiting,
+        Phase::Idle => match since_last {
+            Some(elapsed) if elapsed < gap => {
+                FetchButton::Cooldown((gap - elapsed).as_secs_f64().ceil() as u64)
+            }
+            _ => FetchButton::Ready,
+        },
+    }
+}
 
 #[derive(Debug, PartialEq)]
 pub enum Entry {
@@ -26,7 +53,7 @@ pub enum Entry {
     Info(String),
     Separator,
     DismissAll,
-    Fetch(Phase),
+    Fetch(FetchButton),
     LaunchAtLogin(LoginState),
     Quit,
 }
@@ -44,7 +71,7 @@ pub struct Inputs<'a> {
     pub failures: &'a [String],
     pub dismissed: &'a Dismissed,
     pub login: LoginState,
-    pub fetch: Phase,
+    pub fetch: FetchButton,
     /// 設定ファイルに書かれた順のワークスペース（設定の name）
     pub workspaces: &'a [String],
 }
@@ -175,7 +202,7 @@ mod tests {
                 failures,
                 dismissed,
                 login,
-                fetch: Phase::Idle,
+                fetch: FetchButton::Ready,
                 workspaces,
             },
             &jst(),
@@ -188,7 +215,7 @@ mod tests {
 
     fn footer() -> [Entry; 4] {
         [
-            Entry::Fetch(Phase::Idle),
+            Entry::Fetch(FetchButton::Ready),
             Entry::LaunchAtLogin(LoginState::Off),
             Entry::Separator,
             Entry::Quit,
@@ -343,7 +370,11 @@ mod tests {
     #[test]
     fn shows_fetch_phase() {
         let users = users();
-        for fetch in [Phase::Fetching, Phase::Waiting] {
+        for fetch in [
+            FetchButton::Fetching,
+            FetchButton::Waiting,
+            FetchButton::Cooldown(20),
+        ] {
             let menu = build(
                 &Inputs {
                     cache: None,
@@ -359,6 +390,33 @@ mod tests {
 
             assert!(menu.entries.contains(&Entry::Fetch(fetch)));
         }
+    }
+
+    #[test]
+    fn fetch_button_follows_phase_and_gap() {
+        let gap = Duration::from_secs(30);
+
+        assert_eq!(
+            fetch_button(Phase::Fetching, None, gap),
+            FetchButton::Fetching
+        );
+        assert_eq!(
+            fetch_button(Phase::Waiting, Some(gap), gap),
+            FetchButton::Waiting
+        );
+        assert_eq!(fetch_button(Phase::Idle, None, gap), FetchButton::Ready);
+        assert_eq!(
+            fetch_button(Phase::Idle, Some(Duration::from_secs(30)), gap),
+            FetchButton::Ready
+        );
+        assert_eq!(
+            fetch_button(Phase::Idle, Some(Duration::from_millis(9_500)), gap),
+            FetchButton::Cooldown(21)
+        );
+        assert_eq!(
+            fetch_button(Phase::Idle, Some(Duration::from_millis(29_999)), gap),
+            FetchButton::Cooldown(1)
+        );
     }
 
     #[test]

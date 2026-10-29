@@ -1,23 +1,23 @@
 use std::cell::RefCell;
 use std::ptr::NonNull;
 use std::sync::mpsc::Sender;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use block2::{DynBlock, RcBlock};
 use chrono::Local;
 use dispatch2::DispatchQueue;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Bool, ProtocolObject, Sel};
-use objc2::{define_class, msg_send, sel, AnyThread, DefinedClass, MainThreadOnly};
+use objc2::{AnyThread, DefinedClass, MainThreadOnly, define_class, msg_send, sel};
 use objc2_app_kit::{
-    NSApplication, NSCellImagePosition, NSControlStateValueOn, NSImage, NSMenu, NSMenuItem,
-    NSStatusBar, NSStatusItem, NSVariableStatusItemLength, NSWorkspace,
+    NSApplication, NSCellImagePosition, NSControlStateValueOn, NSImage, NSMenu, NSMenuDelegate,
+    NSMenuItem, NSStatusBar, NSStatusItem, NSVariableStatusItemLength, NSWorkspace,
     NSWorkspaceDidWakeNotification,
 };
 use objc2_foundation::{
-    ns_string, MainThreadMarker, NSBundle, NSDictionary, NSError, NSNotification, NSObject,
-    NSObjectProtocol, NSRunLoop, NSRunLoopCommonModes, NSSize, NSString, NSTimer, NSURL,
+    MainThreadMarker, NSBundle, NSDictionary, NSError, NSNotification, NSObject, NSObjectProtocol,
+    NSRunLoop, NSRunLoopCommonModes, NSSize, NSString, NSTimer, NSURL, ns_string,
 };
 use objc2_service_management::SMAppService;
 use objc2_user_notifications::{
@@ -29,7 +29,7 @@ use crate::config::Config;
 use crate::dismiss;
 use crate::fetch;
 use crate::login::{self, LoginState};
-use crate::menu::{self, Entry, Menu};
+use crate::menu::{self, Entry, FetchButton, Menu};
 use crate::notify::PERMALINK_KEY;
 use crate::scheduler::{self, Phase};
 use crate::state::{Cache, SeenKey, Store};
@@ -43,8 +43,11 @@ const FETCH_MIN_GAP: Duration = Duration::from_secs(30);
 struct Ui {
     status_item: Retained<NSStatusItem>,
     target: Retained<MenuTarget>,
+    menu: Retained<NSMenu>,
     failures: Vec<String>,
     phase: Phase,
+    /// 最後に取得が終わった時刻。「今すぐ取得（あと N 秒）」に使う
+    last_fetched: Option<Instant>,
     badge: String,
     icons: Icons,
     frame: usize,
@@ -176,6 +179,16 @@ define_class!(
             NSApplication::sharedApplication(self.mtm()).terminate(None);
         }
     }
+
+    unsafe impl NSObjectProtocol for MenuTarget {}
+
+    unsafe impl NSMenuDelegate for MenuTarget {
+        // 開く直前に作り直し、「あと N 秒」などをその時点の値にする
+        #[unsafe(method(menuNeedsUpdate:))]
+        fn menu_needs_update(&self, _menu: &NSMenu) {
+            refresh();
+        }
+    }
 );
 
 impl MenuTarget {
@@ -230,12 +243,19 @@ pub fn run() -> Result<()> {
     if let Some(button) = status_item.button(mtm) {
         button.setImagePosition(NSCellImagePosition::ImageLeft);
     }
+    // メニューは 1 つだけ作り、作り直すときは中の項目を入れ替える
+    let menu = NSMenu::new(mtm);
+    menu.setAutoenablesItems(false);
+    menu.setDelegate(Some(ProtocolObject::from_ref(&*target)));
+    status_item.setMenu(Some(&menu));
     UI.with(|ui| {
         *ui.borrow_mut() = Some(Ui {
             status_item,
             target,
+            menu,
             failures: Vec::new(),
             phase: Phase::Idle,
+            last_fetched: None,
             badge: String::new(),
             icons: Icons::load(),
             frame: 0,
@@ -252,6 +272,9 @@ pub fn run() -> Result<()> {
 fn on_phase(phase: Phase) {
     UI.with(|ui| {
         if let Some(ui) = ui.borrow_mut().as_mut() {
+            if ui.phase == Phase::Fetching && phase != Phase::Fetching {
+                ui.last_fetched = Some(Instant::now());
+            }
             ui.phase = phase;
             if phase == Phase::Fetching {
                 ui.stopping = false;
@@ -372,7 +395,11 @@ fn refresh() {
                     failures: &ui.failures,
                     dismissed: &dismissed,
                     login: login_state(),
-                    fetch: ui.phase,
+                    fetch: menu::fetch_button(
+                        ui.phase,
+                        ui.last_fetched.map(|finished| finished.elapsed()),
+                        FETCH_MIN_GAP,
+                    ),
                     workspaces: &workspaces,
                 },
                 &Local,
@@ -412,12 +439,10 @@ fn dismiss_with(select: impl FnOnce(&Cache) -> Vec<SeenKey>) {
 fn show(ui: &mut Ui, model: &Menu, mtm: MainThreadMarker) {
     ui.badge = model.badge.clone();
     update_icon(ui, mtm);
-    let menu = NSMenu::new(mtm);
-    menu.setAutoenablesItems(false);
+    ui.menu.removeAllItems();
     for entry in &model.entries {
-        menu.addItem(&menu_item(entry, &ui.target, mtm));
+        ui.menu.addItem(&menu_item(entry, &ui.target, mtm));
     }
-    ui.status_item.setMenu(Some(&menu));
 }
 
 fn menu_item(entry: &Entry, target: &MenuTarget, mtm: MainThreadMarker) -> Retained<NSMenuItem> {
@@ -456,14 +481,15 @@ fn menu_item(entry: &Entry, target: &MenuTarget, mtm: MainThreadMarker) -> Retai
             unsafe { item.setTarget(Some(target)) };
             item
         }
-        Entry::Fetch(phase) => {
-            let title = match phase {
-                Phase::Idle => "今すぐ取得",
-                Phase::Waiting => "取得待機中",
-                Phase::Fetching => "取得中…",
+        Entry::Fetch(button) => {
+            let title = match button {
+                FetchButton::Ready => "今すぐ取得".to_owned(),
+                FetchButton::Cooldown(seconds) => format!("今すぐ取得（あと {seconds} 秒）"),
+                FetchButton::Waiting => "取得待機中".to_owned(),
+                FetchButton::Fetching => "取得中…".to_owned(),
             };
-            let item = new_item(title, Some(sel!(fetchNow:)), mtm);
-            item.setEnabled(*phase == Phase::Idle);
+            let item = new_item(&title, Some(sel!(fetchNow:)), mtm);
+            item.setEnabled(*button == FetchButton::Ready);
             unsafe { item.setTarget(Some(target)) };
             item
         }
