@@ -1,6 +1,22 @@
 use std::collections::BTreeMap;
+use std::fmt::Display;
+
+use chrono::TimeZone;
 
 use crate::state::Item;
+
+pub fn location(item: &Item) -> String {
+    format!("{} / {}", item.workspace, channel_label(item))
+}
+
+pub fn format_time<Tz: TimeZone>(tz: &Tz, seconds: i64, pattern: &str) -> String
+where
+    Tz::Offset: Display,
+{
+    tz.timestamp_opt(seconds, 0)
+        .single()
+        .map_or_else(String::new, |time| time.format(pattern).to_string())
+}
 
 pub fn channel_label(item: &Item) -> String {
     if item.is_im {
@@ -74,6 +90,33 @@ fn render_token(token: &str, names: &BTreeMap<String, String>) -> String {
 #[cfg(test)]
 pub mod tests {
     use super::*;
+    use crate::state::{Cache, Users};
+    use chrono::FixedOffset;
+
+    pub fn jst() -> FixedOffset {
+        FixedOffset::east_opt(9 * 3600).unwrap()
+    }
+
+    pub fn cache() -> Cache {
+        let mut dm = item("D1", "1793181600.000100");
+        dm.is_im = true;
+        dm.channel_name = "U2".into();
+        dm.peer_name = Some("相手".into());
+        dm.text = "<@U1> a|b\n次の行".into();
+        let mut bot = item("C1", "1793178000.000200");
+        bot.user_name = None;
+        Cache {
+            fetched_at: 1793181900,
+            items: vec![dm, bot],
+        }
+    }
+
+    pub fn users() -> Users {
+        BTreeMap::from([(
+            "home".to_owned(),
+            BTreeMap::from([("U1".to_owned(), "自分".to_owned())]),
+        )])
+    }
 
     pub fn item(channel: &str, ts: &str) -> Item {
         Item {
