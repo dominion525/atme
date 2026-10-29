@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::ptr::NonNull;
 use std::sync::mpsc;
+use std::thread;
 use std::time::Duration;
 
 use block2::RcBlock;
@@ -19,6 +20,7 @@ pub const PERMALINK_KEY: &str = "permalink";
 const MAX_INDIVIDUAL: usize = 5;
 const MESSAGE_CHARS: usize = 100;
 const CALLBACK_TIMEOUT: Duration = Duration::from_secs(10);
+const NOTIFY_INTERVAL: Duration = Duration::from_secs(1);
 
 #[derive(Debug, PartialEq)]
 struct Notification {
@@ -52,8 +54,12 @@ pub fn notify(items: &[Item], users: &Users) {
             return;
         }
     }
-    for notification in notifications {
-        if let Err(error) = send(&center, &notification) {
+    for (index, notification) in notifications.iter().enumerate() {
+        // 同時に出すとバナーが 1 つにまとめられるので、間隔をあけて 1 件ずつ出す
+        if index > 0 {
+            thread::sleep(NOTIFY_INTERVAL);
+        }
+        if let Err(error) = send(&center, notification) {
             eprintln!("通知を出せませんでした: {error}");
         }
     }
