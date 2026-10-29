@@ -1,23 +1,38 @@
 #!/bin/bash
 # リリースビルドから target/release/atme.app を作って署名する。
 # ATME_SIGN_IDENTITY に証明書の名前（一部でよい）を入れるとその証明書で、無ければ ad-hoc で署名する。
+# アイコンは assets/icon.svg から作るので、rsvg-convert（brew install librsvg）が要る。
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 version=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$root/Cargo.toml" | head -n 1)
 app="$root/target/release/atme.app"
+iconset="$root/target/release/atme.iconset"
+
+if ! command -v rsvg-convert > /dev/null; then
+  echo "rsvg-convert が見つかりません。brew install librsvg で入れてください" >&2
+  exit 1
+fi
 
 cargo build --release --manifest-path "$root/Cargo.toml"
 
-rm -rf "$app"
-mkdir -p "$app/Contents/MacOS"
+rm -rf "$app" "$iconset"
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$iconset"
 cp "$root/target/release/atme" "$app/Contents/MacOS/atme"
+
+for size in 16 32 128 256 512; do
+  rsvg-convert -w "$size" -h "$size" "$root/assets/icon.svg" -o "$iconset/icon_${size}x${size}.png"
+  rsvg-convert -w $((size * 2)) -h $((size * 2)) "$root/assets/icon.svg" -o "$iconset/icon_${size}x${size}@2x.png"
+done
+iconutil --convert icns --output "$app/Contents/Resources/atme.icns" "$iconset"
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>CFBundleExecutable</key>
+  <string>atme</string>
+  <key>CFBundleIconFile</key>
   <string>atme</string>
   <key>CFBundleIdentifier</key>
   <string>com.dominion525.atme</string>
