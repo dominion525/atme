@@ -7,6 +7,7 @@ use crate::dismiss;
 use crate::display;
 use crate::fetch::Report;
 use crate::login::LoginState;
+use crate::scheduler::Phase;
 use crate::state::{Cache, Dismissed, Users};
 
 const MESSAGE_CHARS: usize = 50;
@@ -25,7 +26,7 @@ pub enum Entry {
     Info(String),
     Separator,
     DismissAll,
-    FetchNow,
+    Fetch(Phase),
     LaunchAtLogin(LoginState),
     Quit,
 }
@@ -42,6 +43,7 @@ pub struct Inputs<'a> {
     pub failures: &'a [String],
     pub dismissed: &'a Dismissed,
     pub login: LoginState,
+    pub fetch: Phase,
     /// 設定ファイルに書かれた順のワークスペース（設定の name）
     pub workspaces: &'a [String],
 }
@@ -115,7 +117,7 @@ where
         }
     };
     entries.extend(inputs.failures.iter().cloned().map(Entry::Info));
-    entries.push(Entry::FetchNow);
+    entries.push(Entry::Fetch(inputs.fetch));
     entries.push(Entry::LaunchAtLogin(inputs.login));
     entries.push(Entry::Separator);
     entries.push(Entry::Quit);
@@ -172,6 +174,7 @@ mod tests {
                 failures,
                 dismissed,
                 login,
+                fetch: Phase::Idle,
                 workspaces,
             },
             &jst(),
@@ -184,7 +187,7 @@ mod tests {
 
     fn footer() -> [Entry; 4] {
         [
-            Entry::FetchNow,
+            Entry::Fetch(Phase::Idle),
             Entry::LaunchAtLogin(LoginState::Off),
             Entry::Separator,
             Entry::Quit,
@@ -334,6 +337,27 @@ mod tests {
 
         assert_eq!(menu.entries[2], Entry::Info("取得に失敗：home（x）".into()));
         assert_eq!(menu.entries[3..], footer());
+    }
+
+    #[test]
+    fn shows_fetch_phase() {
+        let users = users();
+        for fetch in [Phase::Fetching, Phase::Waiting] {
+            let menu = build(
+                &Inputs {
+                    cache: None,
+                    users: &users,
+                    failures: &[],
+                    dismissed: &Dismissed::new(),
+                    login: LoginState::Off,
+                    fetch,
+                    workspaces: &home(),
+                },
+                &jst(),
+            );
+
+            assert!(menu.entries.contains(&Entry::Fetch(fetch)));
+        }
     }
 
     #[test]

@@ -29,15 +29,18 @@ use crate::fetch;
 use crate::login::{self, LoginState};
 use crate::menu::{self, Entry, Menu};
 use crate::notify::PERMALINK_KEY;
-use crate::scheduler;
+use crate::scheduler::{self, Phase};
 use crate::state::{Cache, SeenKey, Store};
 
 const FETCH_INTERVAL: Duration = Duration::from_secs(300);
+// search.messages の呼び出し回数の上限に届かないよう、続けて取得するときはこれだけ空ける
+const FETCH_MIN_GAP: Duration = Duration::from_secs(30);
 
 struct Ui {
     status_item: Retained<NSStatusItem>,
     target: Retained<MenuTarget>,
     failures: Vec<String>,
+    phase: Phase,
 }
 
 thread_local! {
@@ -167,10 +170,15 @@ pub fn run() -> Result<()> {
     center.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
     request_authorization(&center);
 
-    let (trigger, _worker) = scheduler::spawn(FETCH_INTERVAL, || {
-        let failures = menu::failure_lines(&fetch::fetch_once());
-        DispatchQueue::main().exec_async(move || on_fetched(failures));
-    });
+    let (trigger, _worker) = scheduler::spawn(
+        FETCH_INTERVAL,
+        FETCH_MIN_GAP,
+        || {
+            let failures = menu::failure_lines(&fetch::fetch_once());
+            DispatchQueue::main().exec_async(move || on_fetched(failures));
+        },
+        |phase| DispatchQueue::main().exec_async(move || on_phase(phase)),
+    );
     let target = MenuTarget::new(mtm, trigger);
     let observer: &AnyObject = &target;
     unsafe {
@@ -190,12 +198,22 @@ pub fn run() -> Result<()> {
             status_item,
             target,
             failures: Vec::new(),
+            phase: Phase::Fetching,
         })
     });
     refresh();
 
     app.run();
     Ok(())
+}
+
+fn on_phase(phase: Phase) {
+    UI.with(|ui| {
+        if let Some(ui) = ui.borrow_mut().as_mut() {
+            ui.phase = phase;
+        }
+    });
+    refresh();
 }
 
 fn on_fetched(failures: Vec<String>) {
@@ -251,6 +269,7 @@ fn refresh() {
                     failures: &ui.failures,
                     dismissed: &dismissed,
                     login: login_state(),
+                    fetch: ui.phase,
                     workspaces: &workspaces,
                 },
                 &Local,
@@ -335,8 +354,14 @@ fn menu_item(entry: &Entry, target: &MenuTarget, mtm: MainThreadMarker) -> Retai
             unsafe { item.setTarget(Some(target)) };
             item
         }
-        Entry::FetchNow => {
-            let item = new_item("今すぐ取得", Some(sel!(fetchNow:)), mtm);
+        Entry::Fetch(phase) => {
+            let title = match phase {
+                Phase::Idle => "今すぐ取得",
+                Phase::Waiting => "まもなく取得",
+                Phase::Fetching => "取得中…",
+            };
+            let item = new_item(title, Some(sel!(fetchNow:)), mtm);
+            item.setEnabled(*phase == Phase::Idle);
             unsafe { item.setTarget(Some(target)) };
             item
         }
