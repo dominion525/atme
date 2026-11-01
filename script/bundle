@@ -14,8 +14,8 @@ identity="${ATME_SIGN_IDENTITY:--}"
 sparkle_version=2.10.1
 sparkle_sha256=1a856d2a9edb8e628de88121d7be04cf0e2167f8641650b78fca00b14244cf27
 sparkle_dir="$root/target/sparkle-$sparkle_version"
-# appcast の置き場所が決まるまでの仮の URL
-feed_url="https://example.invalid/atme/appcast.xml"
+# appcast は gh-pages ブランチを GitHub Pages で配信する（blip と同じ形）
+feed_url="https://atme.dominion525.com/appcast.xml"
 # 更新の署名を確かめる公開鍵。秘密鍵は generate_keys --account atme でキーチェーンに入れたもの
 sparkle_public_key="KhhV0ZkVYZZfZCw9F5CUEHVW9WPUnBvpGzOQyLpO4eI="
 
@@ -86,6 +86,8 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <string>$version</string>
   <key>LSUIElement</key>
   <true/>
+  <key>LSMinimumSystemVersion</key>
+  <string>13.0</string>
   <key>SUFeedURL</key>
   <string>$feed_url</string>
   <key>SUPublicEDKey</key>
