@@ -4,6 +4,8 @@ use std::path::PathBuf;
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 
+use crate::l10n;
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
@@ -28,19 +30,19 @@ impl Config {
     pub fn load() -> Result<Self> {
         let path = path()?;
         let text = std::fs::read_to_string(&path)
-            .with_context(|| format!("{} を読めませんでした", path.display()))?;
-        Self::parse(&text).with_context(|| format!("{} の内容が正しくありません", path.display()))
+            .with_context(|| l10n::format(l10n::READ_FAILED, &[&path.display().to_string()]))?;
+        Self::parse(&text).with_context(|| l10n::format(l10n::INVALID_CONTENTS, &[&path.display().to_string()]))
     }
 
     fn parse(text: &str) -> Result<Self> {
         let config: Config = toml::from_str(text)?;
         if config.workspace.is_empty() {
-            bail!("[[workspace]] が 1 つもありません");
+            bail!(l10n::text(l10n::NO_WORKSPACE));
         }
         let mut names = HashSet::new();
         for workspace in &config.workspace {
             if !names.insert(workspace.name.as_str()) {
-                bail!("ワークスペース名 {} が重複しています", workspace.name);
+                bail!(l10n::format(l10n::DUPLICATE_WORKSPACE, &[&workspace.name]));
             }
         }
         Ok(config)
@@ -48,7 +50,7 @@ impl Config {
 }
 
 pub fn path() -> Result<PathBuf> {
-    let home = std::env::var_os("HOME").context("HOME が設定されていません")?;
+    let home = std::env::var_os("HOME").with_context(|| l10n::text(l10n::HOME_NOT_SET))?;
     Ok(PathBuf::from(home).join(".config/atme/config.toml"))
 }
 
@@ -122,6 +124,6 @@ mod tests {
         )
         .unwrap_err();
 
-        assert!(error.to_string().contains("重複"));
+        assert_eq!(error.to_string(), "Workspace name home is duplicated");
     }
 }

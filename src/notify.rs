@@ -38,7 +38,7 @@ pub fn notify(items: &[Item], users: &Users, teams: &BTreeMap<String, String>) {
         return;
     }
     if !app::in_app_bundle() {
-        eprintln!("atme.app の外から実行したため、通知を出しません");
+        eprintln!("{}", l10n::text(l10n::OUTSIDE_APP_NOTIFY));
         return;
     }
     let center = UNUserNotificationCenter::currentNotificationCenter();
@@ -47,11 +47,11 @@ pub fn notify(items: &[Item], users: &Users, teams: &BTreeMap<String, String>) {
             if status == UNAuthorizationStatus::Authorized
                 || status == UNAuthorizationStatus::Provisional => {}
         Some(_) => {
-            eprintln!("通知が許可されていません。atme.app を open して許可してください");
+            eprintln!("{}", l10n::text(l10n::NOTIFICATIONS_NOT_ALLOWED_OPEN));
             return;
         }
         None => {
-            eprintln!("通知の設定を読めなかったため、通知を出しません");
+            eprintln!("{}", l10n::text(l10n::NOTIFICATION_SETTINGS_UNREADABLE));
             return;
         }
     }
@@ -61,7 +61,7 @@ pub fn notify(items: &[Item], users: &Users, teams: &BTreeMap<String, String>) {
             thread::sleep(NOTIFY_INTERVAL);
         }
         if let Err(error) = send(&center, notification) {
-            eprintln!("通知を出せませんでした: {error}");
+            eprintln!("{}", l10n::format(l10n::NOTIFY_FAILED, &[&error.to_string()]));
         }
     }
 }
@@ -91,7 +91,7 @@ fn send(center: &UNUserNotificationCenter, notification: &Notification) -> Resul
     match receiver.recv_timeout(CALLBACK_TIMEOUT) {
         Ok(None) => Ok(()),
         Ok(Some(error)) => Err(error),
-        Err(_) => Err("通知の登録の応答がありませんでした".into()),
+        Err(_) => Err(l10n::text(l10n::NOTIFICATION_NO_RESPONSE).into()),
     }
 }
 

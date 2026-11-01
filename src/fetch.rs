@@ -6,6 +6,7 @@ use chrono::{Local, NaiveDate, TimeDelta};
 use crate::config::{Config, Workspace};
 use crate::credentials::Token;
 use crate::display;
+use crate::l10n;
 use crate::notify;
 use crate::read;
 use crate::slack::{Client, Message};
@@ -41,7 +42,7 @@ pub fn run() -> Result<()> {
         }
     }
     if failed {
-        bail!("取得に失敗したワークスペースがあります");
+        bail!(l10n::text(l10n::SOME_WORKSPACES_FAILED));
     }
     Ok(())
 }
@@ -148,8 +149,11 @@ fn fetch_workspace(
             }
             Err(error) => {
                 eprintln!(
-                    "{}: {id} の表示名を引けませんでした: {error:#}",
-                    workspace.name
+                    "{}",
+                    l10n::format(
+                        l10n::DISPLAY_NAME_FAILED,
+                        &[&workspace.name, &id, &format!("{error:#}")],
+                    )
                 )
             }
         }

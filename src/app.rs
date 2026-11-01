@@ -216,7 +216,7 @@ fn start_updater() -> Option<Retained<AnyObject>> {
     let path = NSString::from_str(&format!("{frameworks}/Sparkle.framework"));
     let bundle = NSBundle::bundleWithPath(&path)?;
     if !unsafe { bundle.load() } {
-        eprintln!("Sparkle.framework を読み込めませんでした");
+        eprintln!("{}", l10n::text(l10n::SPARKLE_LOAD_FAILED));
         return None;
     }
     let class = AnyClass::get(c"SPUStandardUpdaterController")?;
@@ -234,9 +234,9 @@ fn start_updater() -> Option<Retained<AnyObject>> {
 
 pub fn run() -> Result<()> {
     if !in_app_bundle() {
-        bail!("atme.app の外から実行したため、常駐できません");
+        bail!(l10n::text(l10n::OUTSIDE_APP_RESIDENT));
     }
-    let mtm = MainThreadMarker::new().context("メインスレッドで動いていません")?;
+    let mtm = MainThreadMarker::new().with_context(|| l10n::text(l10n::NOT_MAIN_THREAD))?;
     let app = NSApplication::sharedApplication(mtm);
     let center = UNUserNotificationCenter::currentNotificationCenter();
     let delegate = NotificationDelegate::new();
@@ -576,11 +576,14 @@ fn request_authorization(center: &UNUserNotificationCenter) {
     let handler = RcBlock::new(|granted: Bool, error: *mut NSError| {
         if let Some(error) = unsafe { error.as_ref() } {
             eprintln!(
-                "通知の許可を求められませんでした: {}",
-                error.localizedDescription()
+                "{}",
+                l10n::format(
+                    l10n::NOTIFICATION_REQUEST_FAILED,
+                    &[&error.localizedDescription().to_string()],
+                )
             );
         } else if !granted.as_bool() {
-            eprintln!("通知が許可されていません。システム設定の「通知」で atme を許可してください");
+            eprintln!("{}", l10n::text(l10n::NOTIFICATIONS_NOT_ALLOWED_SETTINGS));
         }
     });
     center.requestAuthorizationWithOptions_completionHandler(

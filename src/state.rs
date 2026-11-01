@@ -8,6 +8,8 @@ use anyhow::{Context, Result};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
+use crate::l10n;
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct SeenKey {
     pub workspace: String,
@@ -78,7 +80,7 @@ pub struct Store {
 
 impl Store {
     pub fn open() -> Result<Self> {
-        let home = std::env::var_os("HOME").context("HOME が設定されていません")?;
+        let home = std::env::var_os("HOME").with_context(|| l10n::text(l10n::HOME_NOT_SET))?;
         Ok(Self::new(PathBuf::from(home).join(".local/state/atme")))
     }
 
@@ -124,23 +126,23 @@ fn read_json<T: DeserializeOwned>(path: &Path) -> Result<Option<T>> {
         Ok(text) => text,
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
         Err(error) => {
-            return Err(error).with_context(|| format!("{} を読めませんでした", path.display()));
+            return Err(error).with_context(|| l10n::format(l10n::READ_FAILED, &[&path.display().to_string()]));
         }
     };
     let value = serde_json::from_str(&text)
-        .with_context(|| format!("{} の内容が正しくありません", path.display()))?;
+        .with_context(|| l10n::format(l10n::INVALID_CONTENTS, &[&path.display().to_string()]))?;
     Ok(Some(value))
 }
 
 fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
-    let dir = path.parent().context("保存先のディレクトリがありません")?;
+    let dir = path.parent().with_context(|| l10n::text(l10n::NO_SAVE_DIR))?;
     DirBuilder::new()
         .recursive(true)
         .mode(0o700)
         .create(dir)
-        .with_context(|| format!("{} を作れませんでした", dir.display()))?;
+        .with_context(|| l10n::format(l10n::CREATE_FAILED, &[&dir.display().to_string()]))?;
     fs::set_permissions(dir, Permissions::from_mode(0o700))
-        .with_context(|| format!("{} の権限を設定できませんでした", dir.display()))?;
+        .with_context(|| l10n::format(l10n::PERMISSION_FAILED, &[&dir.display().to_string()]))?;
     let tmp = path.with_extension("json.tmp");
     let mut file = OpenOptions::new()
         .write(true)
@@ -148,12 +150,12 @@ fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
         .truncate(true)
         .mode(0o600)
         .open(&tmp)
-        .with_context(|| format!("{} を開けませんでした", tmp.display()))?;
+        .with_context(|| l10n::format(l10n::OPEN_FAILED, &[&tmp.display().to_string()]))?;
     file.set_permissions(Permissions::from_mode(0o600))
-        .with_context(|| format!("{} の権限を設定できませんでした", tmp.display()))?;
+        .with_context(|| l10n::format(l10n::PERMISSION_FAILED, &[&tmp.display().to_string()]))?;
     file.write_all(&serde_json::to_vec_pretty(value)?)
-        .with_context(|| format!("{} に書けませんでした", tmp.display()))?;
-    fs::rename(&tmp, path).with_context(|| format!("{} に置き換えられませんでした", path.display()))
+        .with_context(|| l10n::format(l10n::WRITE_FAILED, &[&tmp.display().to_string()]))?;
+    fs::rename(&tmp, path).with_context(|| l10n::format(l10n::REPLACE_FAILED, &[&path.display().to_string()]))
 }
 
 #[cfg(test)]

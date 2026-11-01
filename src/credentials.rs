@@ -4,6 +4,7 @@ use std::process::Command;
 use anyhow::{bail, Context, Result};
 
 use crate::config::Workspace;
+use crate::l10n;
 
 const SERVICE: &str = "atme";
 
@@ -30,15 +31,15 @@ fn read(account: &str) -> Result<String> {
     let output = Command::new("security")
         .args(["find-generic-password", "-s", SERVICE, "-a", account, "-w"])
         .output()
-        .context("security コマンドを実行できませんでした")?;
+        .with_context(|| l10n::text(l10n::SECURITY_FAILED))?;
     if !output.status.success() {
-        bail!(
-            "Keychain から service={SERVICE} account={account} を読めませんでした: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
+        bail!(l10n::format(
+            l10n::KEYCHAIN_READ_FAILED,
+            &[SERVICE, account, String::from_utf8_lossy(&output.stderr).trim()],
+        ));
     }
     let value = String::from_utf8(output.stdout)
-        .with_context(|| format!("Keychain の account={account} の値が UTF-8 ではありません"))?;
+        .with_context(|| l10n::format(l10n::KEYCHAIN_NOT_UTF8, &[account]))?;
     Ok(value.trim_end_matches('\n').to_owned())
 }
 

@@ -4,6 +4,7 @@ use serde::de::DeserializeOwned;
 use serde::Deserialize;
 
 use crate::credentials::Token;
+use crate::l10n;
 use crate::read::{ChannelState, ReadSource, ThreadState};
 
 const API_URL: &str = "https://slack.com/api";
@@ -11,14 +12,23 @@ const API_URL: &str = "https://slack.com/api";
 impl ReadSource for Client {
     fn channel(&self, channel: &str) -> Option<ChannelState> {
         self.conversation_state(channel)
-            .inspect_err(|error| eprintln!("{channel} の既読を読めませんでした: {error:#}"))
+            .inspect_err(|error| eprintln!(
+                    "{}",
+                    l10n::format(l10n::CHANNEL_READ_STATE_FAILED, &[channel, &format!("{error:#}")])
+                ))
             .ok()
     }
 
     fn thread(&self, channel: &str, thread_ts: &str) -> Option<ThreadState> {
         self.thread_state(channel, thread_ts)
             .inspect_err(|error| {
-                eprintln!("{channel} のスレッド {thread_ts} の既読を読めませんでした: {error:#}")
+                eprintln!(
+                    "{}",
+                    l10n::format(
+                        l10n::THREAD_READ_STATE_FAILED,
+                        &[channel, thread_ts, &format!("{error:#}")],
+                    )
+                )
             })
             .ok()
     }
@@ -138,7 +148,7 @@ impl Client {
     pub fn new(token: Token) -> Result<Self> {
         let http = HttpClient::builder()
             .build()
-            .context("HTTP クライアントを作れませんでした")?;
+            .with_context(|| l10n::text(l10n::HTTP_CLIENT_FAILED))?;
         Ok(Self { http, token })
     }
 
@@ -188,7 +198,7 @@ impl Client {
             .messages
             .into_iter()
             .next()
-            .context("conversations.replies がスレッドの親を返しませんでした")?;
+            .with_context(|| l10n::text(l10n::NO_THREAD_PARENT))?;
         Ok(ThreadState {
             subscribed: parent.subscribed,
             last_read: parent.last_read,
@@ -202,23 +212,23 @@ impl Client {
             .bearer_auth(self.token.as_str())
             .form(params)
             .send()
-            .with_context(|| format!("{method} を呼び出せませんでした"))?;
+            .with_context(|| l10n::format(l10n::CALL_FAILED, &[method]))?;
         let status = response.status();
         if !status.is_success() {
-            bail!("{method} が HTTP {status} を返しました");
+            bail!(l10n::format(l10n::HTTP_STATUS, &[method, &status.to_string()]));
         }
         let body = response
             .text()
-            .with_context(|| format!("{method} の応答を読めませんでした"))?;
+            .with_context(|| l10n::format(l10n::RESPONSE_READ_FAILED, &[method]))?;
         let envelope: Envelope = serde_json::from_str(&body)
-            .with_context(|| format!("{method} の応答を解釈できませんでした"))?;
+            .with_context(|| l10n::format(l10n::RESPONSE_PARSE_FAILED, &[method]))?;
         if !envelope.ok {
-            bail!(
-                "{method} が失敗しました: {}",
-                envelope.error.unwrap_or_default()
-            );
+            bail!(l10n::format(
+                l10n::API_FAILED,
+                &[method, &envelope.error.unwrap_or_default()],
+            ));
         }
         serde_json::from_str(&body)
-            .with_context(|| format!("{method} の応答を解釈できませんでした"))
+            .with_context(|| l10n::format(l10n::RESPONSE_PARSE_FAILED, &[method]))
     }
 }

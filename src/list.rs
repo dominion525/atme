@@ -5,6 +5,7 @@ use anyhow::{bail, Result};
 use chrono::{Local, TimeZone};
 
 use crate::display;
+use crate::l10n;
 use crate::state::{ts_seconds, Cache, Store, Users};
 
 const TEXT_CHARS: usize = 100;
@@ -12,7 +13,7 @@ const TEXT_CHARS: usize = 100;
 pub fn run() -> Result<()> {
     let store = Store::open()?;
     let Some(cache) = store.load_cache()? else {
-        bail!("キャッシュがありません。atme fetch を実行してください");
+        bail!(l10n::text(l10n::NO_CACHE_RUN_FETCH));
     };
     let users = store.load_users()?.unwrap_or_default();
     print!("{}", text(&cache, &users, &Local));
