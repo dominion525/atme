@@ -28,6 +28,7 @@ use objc2_user_notifications::{
 use crate::config::Config;
 use crate::dismiss;
 use crate::fetch;
+use crate::l10n;
 use crate::login::{self, LoginState};
 use crate::menu::{self, Entry, FetchButton, Menu};
 use crate::notify::PERMALINK_KEY;
@@ -534,14 +535,14 @@ fn menu_item(entry: &Entry, ui: &Ui, mtm: MainThreadMarker) -> Retained<NSMenuIt
         }
         Entry::CheckForUpdates => {
             // SPUStandardUpdaterController の checkForUpdates: を直接呼ばせる
-            let item = new_item("アップデートを確認…", Some(sel!(checkForUpdates:)), mtm);
+            let item = new_item(&l10n::text(l10n::CHECK_FOR_UPDATES), Some(sel!(checkForUpdates:)), mtm);
             if let Some(updater) = &ui.updater {
                 unsafe { item.setTarget(Some(updater)) };
             }
             item
         }
         Entry::Quit => {
-            let item = new_item("終了", Some(sel!(quit:)), mtm);
+            let item = new_item(&l10n::text(l10n::QUIT), Some(sel!(quit:)), mtm);
             unsafe { item.setTarget(Some(target)) };
             item
         }

@@ -6,6 +6,7 @@ mod credentials;
 mod dismiss;
 mod display;
 mod fetch;
+mod l10n;
 mod list;
 mod login;
 mod menu;

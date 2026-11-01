@@ -45,6 +45,11 @@ for size in 16 32 128 256 512; do
 done
 iconutil --convert icns --output "$app/Contents/Resources/atme.icns" "$iconset"
 
+# 訳の文言（macOS 標準の Localizable.strings）。英語はキーそのものなので、訳のファイルは無い
+for lproj in "$root"/resources/*.lproj; do
+  ditto "$lproj" "$app/Contents/Resources/$(basename "$lproj")"
+done
+
 # メニューバーの絵（テンプレート画像）。表示は 18pt、Retina 用に @2x も作る。
 # 取得中の絵は、いつもの絵を中心で 30 度ずつ時計回りに回した 12 枚（menubar-rotate-0 が回す前の絵）
 frames="$root/target/release/menubar-frames"
@@ -70,6 +75,13 @@ cat > "$app/Contents/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+  <key>CFBundleLocalizations</key>
+  <array>
+    <string>en</string>
+    <string>ja</string>
+  </array>
   <key>CFBundleExecutable</key>
   <string>atme</string>
   <key>CFBundleIconFile</key>
