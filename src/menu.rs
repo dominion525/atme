@@ -137,10 +137,15 @@ where
             if !items.is_empty() {
                 entries.push(Entry::DismissAll);
             }
-            entries.push(Entry::Info(format!(
-                "取得 {}",
-                display::format_time(tz, cache.fetched_at, "%m/%d %H:%M")
-            )));
+            // 取得時刻は、1 度も成功していなければ 0 のまま
+            entries.push(Entry::Info(if cache.fetched_at == 0 {
+                "まだ取得できていません".into()
+            } else {
+                format!(
+                    "取得 {}",
+                    display::format_time(tz, cache.fetched_at, "%m/%d %H:%M")
+                )
+            }));
             if items.is_empty() {
                 String::new()
             } else {
@@ -347,6 +352,20 @@ mod tests {
                 Entry::Separator,
                 Entry::Info("取得 10/28 19:05".into()),
             ]
+        );
+    }
+
+    #[test]
+    fn says_not_fetched_yet_when_never_succeeded() {
+        let mut never = cache();
+        never.items.clear();
+        never.fetched_at = 0;
+
+        let menu = build_with(Some(&never), &Dismissed::new(), &[], LoginState::Off, &[]);
+
+        assert_eq!(
+            menu.entries[2],
+            Entry::Info("まだ取得できていません".into())
         );
     }
 

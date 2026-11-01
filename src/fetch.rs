@@ -5,6 +5,7 @@ use chrono::{Local, NaiveDate, TimeDelta};
 
 use crate::config::{Config, Workspace};
 use crate::credentials::Token;
+use crate::display;
 use crate::notify;
 use crate::read;
 use crate::slack::{Client, Message};
@@ -14,6 +15,7 @@ const SECONDS_PER_DAY: i64 = 86_400;
 
 #[derive(Debug, PartialEq)]
 pub struct Report {
+    /// 表示に使うワークスペース名（Slack 上の名前。まだ取得できていなければ設定の name）
     pub workspace: String,
     pub result: std::result::Result<Counts, String>,
 }
@@ -86,12 +88,12 @@ pub fn fetch_once() -> Result<Vec<Report>> {
 
     let cutoff = now.timestamp() - i64::from(config.days) * SECONDS_PER_DAY;
     let (new_items, seen) = diff(previous_seen.as_ref(), &items, cutoff);
-    let reports = config
+    let reports: Vec<Report> = config
         .workspace
         .iter()
         .zip(errors)
         .map(|(workspace, error)| Report {
-            workspace: workspace.name.clone(),
+            workspace: display::workspace_name(&teams, &workspace.name).to_owned(),
             result: match error {
                 Some(error) => Err(error),
                 None => Ok(Counts {
@@ -111,7 +113,11 @@ pub fn fetch_once() -> Result<Vec<Report>> {
 
     store.save_seen(&seen)?;
     store.save_cache(&Cache {
-        fetched_at: now.timestamp(),
+        fetched_at: fetched_at(
+            previous_cache.fetched_at,
+            now.timestamp(),
+            reports.iter().any(|report| report.result.is_ok()),
+        ),
         items,
         teams,
     })?;
@@ -156,6 +162,15 @@ fn fetch_workspace(
         auth.team,
         read::unread_only(merge(fresh, previous), &client),
     ))
+}
+
+/// キャッシュに残す取得時刻。すべてのワークスペースで失敗したときは、前回の時刻のままにする
+fn fetched_at(previous: i64, now: i64, any_succeeded: bool) -> i64 {
+    if any_succeeded {
+        now
+    } else {
+        previous
+    }
 }
 
 fn after_date(today: NaiveDate, days: u32) -> String {
@@ -296,6 +311,12 @@ mod tests {
             channel: channel.into(),
             ts: ts.into(),
         }
+    }
+
+    #[test]
+    fn keeps_fetched_at_when_every_workspace_failed() {
+        assert_eq!(fetched_at(100, 200, true), 200);
+        assert_eq!(fetched_at(100, 200, false), 100);
     }
 
     #[test]
