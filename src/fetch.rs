@@ -92,6 +92,10 @@ pub fn fetch_once() -> Result<Vec<Report>> {
             }
         }
     }
+    // 外したワークスペースの名前の対応と表示名は残さない
+    let names: Vec<&str> = config.workspace.iter().map(|workspace| workspace.name.as_str()).collect();
+    keep_workspaces(&mut teams, &names);
+    keep_workspaces(&mut users, &names);
     items.sort_by_key(|item| std::cmp::Reverse((ts_seconds(&item.ts), item.ts.clone())));
 
     let cutoff = now.timestamp() - i64::from(config.days) * SECONDS_PER_DAY;
@@ -173,6 +177,11 @@ fn fetch_workspace(
         auth.team,
         read::unread_only(merge(fresh, previous), &client),
     ))
+}
+
+/// ワークスペースの名前をキーにした対応から、names に無いものを外す
+fn keep_workspaces<V>(map: &mut BTreeMap<String, V>, names: &[&str]) {
+    map.retain(|name, _| names.contains(&name.as_str()));
 }
 
 /// キャッシュに残す取得時刻。すべてのワークスペースで失敗したときは、前回の時刻のままにする
@@ -322,6 +331,18 @@ mod tests {
             channel: channel.into(),
             ts: ts.into(),
         }
+    }
+
+    #[test]
+    fn keeps_only_configured_workspaces() {
+        let mut teams = BTreeMap::from([
+            ("home".to_owned(), "Home".to_owned()),
+            ("old".to_owned(), "Old".to_owned()),
+        ]);
+
+        keep_workspaces(&mut teams, &["home", "work"]);
+
+        assert_eq!(teams, BTreeMap::from([("home".to_owned(), "Home".to_owned())]));
     }
 
     #[test]

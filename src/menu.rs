@@ -10,7 +10,7 @@ use crate::fetch::Report;
 use crate::l10n;
 use crate::login::LoginState;
 use crate::scheduler::Phase;
-use crate::state::{Cache, Dismissed, Users};
+use crate::state::{Cache, Dismissed, Item, Users};
 
 const MESSAGE_CHARS: usize = 50;
 const FAILURE_CHARS: usize = 60;
@@ -95,14 +95,12 @@ where
             "?".into()
         }
         Some(cache) => {
-            let items = dismiss::visible(cache, inputs.dismissed);
-            // 設定に無くなったワークスペースの項目も、見出しを付けて後ろに出す
-            let mut workspaces: Vec<&str> = inputs.workspaces.iter().map(String::as_str).collect();
-            for item in &items {
-                if !workspaces.contains(&item.workspace.as_str()) {
-                    workspaces.push(&item.workspace);
-                }
-            }
+            // 設定に無いワークスペース（外したばかりで、まだ取得し直していないもの）の項目は出さない
+            let workspaces: Vec<&str> = inputs.workspaces.iter().map(String::as_str).collect();
+            let items: Vec<&Item> = dismiss::visible(cache, inputs.dismissed)
+                .into_iter()
+                .filter(|item| workspaces.contains(&item.workspace.as_str()))
+                .collect();
             let empty = BTreeMap::new();
             for workspace in &workspaces {
                 entries.push(Entry::Header(
@@ -173,7 +171,10 @@ where
 
 pub fn failure_lines(result: &anyhow::Result<Vec<Report>>) -> Vec<String> {
     match result {
-        Err(error) => vec![l10n::format(l10n::FETCH_FAILED, &[&shorten(&format!("{error:#}"))])],
+        Err(error) => vec![l10n::format(
+            l10n::FETCH_FAILED,
+            &[&shorten(&format!("{error:#}"))],
+        )],
         Ok(reports) => reports
             .iter()
             .filter_map(|report| {
@@ -296,11 +297,19 @@ mod tests {
     }
 
     #[test]
-    fn keeps_items_of_workspaces_removed_from_config() {
+    fn hides_items_of_workspaces_removed_from_config() {
+        // キャッシュには home の 2 件があるが、設定からは外した（次の取得の前）
         let menu = build_with(Some(&cache()), &Dismissed::new(), &[], LoginState::Off, &[]);
 
-        assert_eq!(menu.entries[0], Entry::Header("Home 株式会社".into()));
-        assert_eq!(menu.badge, "2");
+        assert_eq!(menu.badge, "");
+        assert_eq!(
+            menu.entries[..2],
+            [
+                Entry::Info("No workspaces. Add one from Workspaces…".into()),
+                Entry::Separator,
+            ]
+        );
+        assert!(!menu.entries.contains(&Entry::DismissAll));
     }
 
     #[test]
@@ -369,12 +378,15 @@ mod tests {
         never.items.clear();
         never.fetched_at = 0;
 
-        let menu = build_with(Some(&never), &Dismissed::new(), &[], LoginState::Off, &home());
-
-        assert_eq!(
-            menu.entries[3],
-            Entry::Info("Not fetched yet".into())
+        let menu = build_with(
+            Some(&never),
+            &Dismissed::new(),
+            &[],
+            LoginState::Off,
+            &home(),
         );
+
+        assert_eq!(menu.entries[3], Entry::Info("Not fetched yet".into()));
     }
 
     #[test]
@@ -384,10 +396,7 @@ mod tests {
         assert_eq!(menu.badge, "?");
         assert_eq!(
             menu.entries[..2],
-            [
-                Entry::Info("No cache".into()),
-                Entry::Separator,
-            ]
+            [Entry::Info("No cache".into()), Entry::Separator,]
         );
         assert_eq!(menu.entries[2..], footer());
     }
@@ -398,7 +407,10 @@ mod tests {
 
         let menu = build_with(None, &Dismissed::new(), &failures, LoginState::Off, &home());
 
-        assert_eq!(menu.entries[2], Entry::Info("Fetch failed: home（x）".into()));
+        assert_eq!(
+            menu.entries[2],
+            Entry::Info("Fetch failed: home（x）".into())
+        );
         assert_eq!(menu.entries[3..], footer());
     }
 
