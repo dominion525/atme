@@ -11,7 +11,7 @@ use objc2::rc::{Allocated, Retained};
 use objc2::runtime::{AnyClass, AnyObject, Bool, ProtocolObject, Sel};
 use objc2::{define_class, msg_send, sel, AnyThread, DefinedClass, MainThreadOnly, Message};
 use objc2_app_kit::{
-    NSAlert, NSAlertSecondButtonReturn, NSAlertStyle, NSApplication, NSModalResponse, NSBackingStoreType, NSButton, NSCellImagePosition, NSControlStateValueOn, NSFont, NSImage,
+    NSAlert, NSAlertFirstButtonReturn, NSAlertSecondButtonReturn, NSAlertStyle, NSApplication, NSColor, NSModalResponse, NSBackingStoreType, NSButton, NSCellImagePosition, NSControlStateValueOn, NSFont, NSImage,
     NSMenu, NSMenuDelegate, NSMenuItem, NSSecureTextField, NSStatusBar, NSStatusItem, NSTextField,
     NSUserInterfaceItemIdentification, NSVariableStatusItemLength, NSView, NSWindow, NSWindowStyleMask,
     NSWorkspace, NSWorkspaceDidWakeNotification,
@@ -64,9 +64,18 @@ struct Ui {
     window: Option<Retained<NSWindow>>,
     token_field: Option<Retained<NSSecureTextField>>,
     /// ウインドウの下に出す、確認中・追加できた・失敗の文
-    setup_status: String,
+    setup_status: Status,
     /// token を確かめているあいだは「追加」を押せなくする
     adding: bool,
+}
+
+/// ワークスペースのウインドウの下に出す文。失敗は赤で出す
+#[derive(Clone, Default)]
+enum Status {
+    #[default]
+    None,
+    Info(String),
+    Error(String),
 }
 
 /// メニューバーの絵。atme.app の Resources から読む。読めなければ文字の @ で代わりにする
@@ -202,7 +211,7 @@ define_class!(
                     return None;
                 }
                 ui.adding = true;
-                ui.setup_status = l10n::text(l10n::CHECKING);
+                ui.setup_status = Status::Info(l10n::text(l10n::CHECKING));
                 Some(token)
             });
             let Some(token) = token else {
@@ -219,8 +228,8 @@ define_class!(
                         if let Some(ui) = ui.borrow_mut().as_mut() {
                             ui.adding = false;
                             ui.setup_status = match &result {
-                                Ok(team) => l10n::format(l10n::ADDED, &[team]),
-                                Err(error) => error.clone(),
+                                Ok(team) => Status::Info(l10n::format(l10n::ADDED, &[team])),
+                                Err(error) => Status::Error(error.clone()),
                             };
                             if let (true, Some(field)) = (added, &ui.token_field) {
                                 field.setStringValue(ns_string!(""));
@@ -241,6 +250,20 @@ define_class!(
                 return;
             };
             confirm_removal(name, self.ivars().clone());
+        }
+
+        #[unsafe(method(closeWorkspaces:))]
+        fn close_workspaces(&self, _sender: &AnyObject) {
+            let Some(window) = UI.with(|ui| ui.borrow().as_ref().and_then(|ui| ui.window.clone()))
+            else {
+                return;
+            };
+            match window.attachedSheet() {
+                // 確認のシートが出ているときは、シートを「キャンセル」（最初のボタン）で閉じる
+                Some(sheet) => window.endSheet_returnCode(&sheet, NSAlertFirstButtonReturn),
+                None if window.isKeyWindow() => window.performClose(None),
+                None => {}
+            }
         }
 
         #[unsafe(method(quit:))]
@@ -340,6 +363,7 @@ pub fn run() -> Result<()> {
     menu.setAutoenablesItems(false);
     menu.setDelegate(Some(ProtocolObject::from_ref(&*target)));
     status_item.setMenu(Some(&menu));
+    install_main_menu(&app, &target, mtm);
     UI.with(|ui| {
         *ui.borrow_mut() = Some(Ui {
             status_item,
@@ -356,11 +380,10 @@ pub fn run() -> Result<()> {
             updater: start_updater(),
             window: None,
             token_field: None,
-            setup_status: String::new(),
+            setup_status: Status::None,
             adding: false,
         })
     });
-    install_edit_menu(&app, mtm);
     refresh();
     // 初めて起動したとき（ワークスペースが 1 つも無いとき）は、追加のウインドウを開く
     if Config::load().map_or(true, |config| config.workspace.is_empty()) {
@@ -644,9 +667,24 @@ fn new_item(title: &str, action: Option<Sel>, mtm: MainThreadMarker) -> Retained
 
 /// アプリのメインメニューに「編集」を置く。Dock に出ないアプリではメインメニューは画面に出ないが、
 /// これがあると入力欄で ⌘V（貼り付け）などのキー操作が効く
-fn install_edit_menu(app: &NSApplication, mtm: MainThreadMarker) {
+fn install_main_menu(app: &NSApplication, target: &MenuTarget, mtm: MainThreadMarker) {
     let main = NSMenu::new(mtm);
-    main.addItem(&NSMenuItem::new(mtm));
+    // ⌘W で、ワークスペースのウインドウ（確認のシートが出ていればシート）を閉じる。
+    // ⌘ の付かない Esc はメインメニューでは処理されないので、ウインドウとシートに置いたボタンで受ける（escape_button）
+    let window = NSMenu::new(mtm);
+    let close = unsafe {
+        NSMenuItem::initWithTitle_action_keyEquivalent(
+            NSMenuItem::alloc(mtm),
+            ns_string!("Close"),
+            Some(sel!(closeWorkspaces:)),
+            ns_string!("w"),
+        )
+    };
+    unsafe { close.setTarget(Some(target)) };
+    window.addItem(&close);
+    let window_item = NSMenuItem::new(mtm);
+    window_item.setSubmenu(Some(&window));
+    main.addItem(&window_item);
     let edit = NSMenu::new(mtm);
     for (title, action, key) in [
         ("Undo", sel!(undo:), "z"),
@@ -673,7 +711,7 @@ fn install_edit_menu(app: &NSApplication, mtm: MainThreadMarker) {
 }
 
 /// 「削除」を押したときに、ワークスペースのウインドウに確認のシートを出す。
-/// 「削除」を選んだときだけ外す。既定のボタン（Return）と Esc は「キャンセル」
+/// 「削除」を選んだときだけ外す。既定のボタン（Return）は「キャンセル」。⌘W と Esc もキャンセルになる（closeWorkspaces:）
 fn confirm_removal(name: String, trigger: Sender<()>) {
     let Some(mtm) = MainThreadMarker::new() else {
         return;
@@ -696,6 +734,9 @@ fn confirm_removal(name: String, trigger: Sender<()>) {
     let remove = alert.addButtonWithTitle(&NSString::from_str(&l10n::text(l10n::REMOVE)));
     remove.setKeyEquivalent(ns_string!(""));
     remove.setHasDestructiveAction(true);
+    if let Some(target) = UI.with(|ui| ui.borrow().as_ref().map(|ui| ui.target.clone())) {
+        alert.setAccessoryView(Some(&escape_button(&target, mtm)));
+    }
     let handler = RcBlock::new(move |response: NSModalResponse| {
         if response == NSAlertSecondButtonReturn {
             remove_now(&name, &trigger);
@@ -707,8 +748,8 @@ fn confirm_removal(name: String, trigger: Sender<()>) {
 /// 設定ファイルと Keychain から外し、ウインドウを作り直して取得し直す
 fn remove_now(name: &str, trigger: &Sender<()>) {
     let status = match setup::remove(name) {
-        Ok(()) => String::new(),
-        Err(error) => format!("{error:#}"),
+        Ok(()) => Status::None,
+        Err(error) => Status::Error(format!("{error:#}")),
     };
     UI.with(|ui| {
         if let Some(ui) = ui.borrow_mut().as_mut() {
@@ -818,10 +859,21 @@ fn show_workspaces() {
             .get_or_insert_with(|| NSSecureTextField::new(mtm))
             .clone();
         let add = button(&l10n::text(l10n::ADD), sel!(addWorkspace:), target, mtm);
+        // 確かめているあいだは、入力欄も「追加」も触れないようにする
+        field.setEnabled(!ui.adding);
         add.setEnabled(!ui.adding);
         add.setKeyEquivalent(ns_string!("\r"));
         rows.push(button_row(&field, add));
-        rows.push(text_row(label(&ui.setup_status, mtm), text_width));
+        let status = match &ui.setup_status {
+            Status::None => label("", mtm),
+            Status::Info(text) => label(text, mtm),
+            Status::Error(text) => {
+                let error = label(text, mtm);
+                error.setTextColor(Some(&NSColor::systemRedColor()));
+                error
+            }
+        };
+        rows.push(text_row(status, text_width));
 
         let sizes: Vec<(f64, Option<NSSize>)> = rows
             .iter()
@@ -832,6 +884,7 @@ fn show_workspaces() {
             NSView::alloc(mtm),
             NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(WINDOW_WIDTH, height)),
         );
+        content.addSubview(&escape_button(target, mtm));
         for (row, (left, right)) in rows.iter().zip(frames) {
             row.left.setFrame(left);
             content.addSubview(&row.left);
@@ -905,6 +958,16 @@ fn button(title: &str, action: Sel, target: &AnyObject, mtm: MainThreadMarker) -
             mtm,
         )
     }
+}
+
+/// Esc で closeWorkspaces: を呼ぶ、見えないボタン（大きさ 0・透明）。
+/// ⌘ の付かないキーはメニューではなくウインドウの中のボタンが受けるので、ウインドウとシートに 1 つずつ置く
+fn escape_button(target: &AnyObject, mtm: MainThreadMarker) -> Retained<NSButton> {
+    let escape = button("", sel!(closeWorkspaces:), target, mtm);
+    escape.setKeyEquivalent(ns_string!("\u{1b}"));
+    escape.setTransparent(true);
+    escape.setFrame(NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0)));
+    escape
 }
 
 fn heading(text: &str, mtm: MainThreadMarker) -> Retained<NSTextField> {
