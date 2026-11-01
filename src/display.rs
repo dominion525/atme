@@ -3,6 +3,7 @@ use std::fmt::Display;
 
 use chrono::TimeZone;
 
+use crate::l10n;
 use crate::state::Item;
 
 /// Slack 上のワークスペース名。まだ取得できていなければ設定の name を使う
@@ -34,7 +35,7 @@ pub fn channel_label(item: &Item) -> String {
             item.peer_name.as_deref().unwrap_or(&item.channel_name)
         )
     } else if item.is_mpim {
-        "グループ DM".into()
+        l10n::text(l10n::GROUP_DM)
     } else {
         format!("#{}", item.channel_name)
     }
@@ -46,7 +47,7 @@ pub fn summary(text: &str, names: &BTreeMap<String, String>, max_chars: usize) -
         .collect::<Vec<_>>()
         .join(" ");
     if text.is_empty() {
-        "（本文なし）".into()
+        l10n::text(l10n::NO_TEXT)
     } else if text.chars().count() > max_chars {
         text.chars().take(max_chars).chain(['…']).collect()
     } else {
@@ -167,7 +168,7 @@ pub mod tests {
         );
         assert_eq!(summary("あいうえお", &names, 3), "あいう…");
         assert_eq!(summary("あいう", &names, 3), "あいう");
-        assert_eq!(summary("", &names, 3), "（本文なし）");
+        assert_eq!(summary("", &names, 3), "(no text)");
     }
 
     #[test]
@@ -189,7 +190,7 @@ pub mod tests {
 
         let mut group = item("G1", "1.0");
         group.is_mpim = true;
-        assert_eq!(channel_label(&group), "グループ DM");
+        assert_eq!(channel_label(&group), "Group DM");
 
         assert_eq!(channel_label(&item("C1", "1.0")), "#general");
     }

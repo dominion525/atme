@@ -7,6 +7,7 @@ use chrono::TimeZone;
 use crate::dismiss;
 use crate::display;
 use crate::fetch::Report;
+use crate::l10n;
 use crate::login::LoginState;
 use crate::scheduler::Phase;
 use crate::state::{Cache, Dismissed, Users};
@@ -87,7 +88,7 @@ where
     let mut entries = Vec::new();
     let badge = match inputs.cache {
         None => {
-            entries.push(Entry::Info("キャッシュがありません".into()));
+            entries.push(Entry::Info(l10n::text(l10n::NO_CACHE)));
             entries.push(Entry::Separator);
             "?".into()
         }
@@ -131,7 +132,7 @@ where
                 }
             }
             if workspaces.is_empty() {
-                entries.push(Entry::Info("メンションと DM はありません".into()));
+                entries.push(Entry::Info(l10n::text(l10n::NOTHING)));
             }
             entries.push(Entry::Separator);
             if !items.is_empty() {
@@ -139,12 +140,9 @@ where
             }
             // 取得時刻は、1 度も成功していなければ 0 のまま
             entries.push(Entry::Info(if cache.fetched_at == 0 {
-                "まだ取得できていません".into()
+                l10n::text(l10n::NOT_FETCHED_YET)
             } else {
-                format!(
-                    "取得 {}",
-                    display::format_time(tz, cache.fetched_at, "%m/%d %H:%M")
-                )
+                l10n::format(l10n::FETCHED_AT, &[&display::format_time(tz, cache.fetched_at, "%m/%d %H:%M")])
             }));
             if items.is_empty() {
                 String::new()
@@ -166,15 +164,14 @@ where
 
 pub fn failure_lines(result: &anyhow::Result<Vec<Report>>) -> Vec<String> {
     match result {
-        Err(error) => vec![format!("取得に失敗：{}", shorten(&format!("{error:#}")))],
+        Err(error) => vec![l10n::format(l10n::FETCH_FAILED, &[&shorten(&format!("{error:#}"))])],
         Ok(reports) => reports
             .iter()
             .filter_map(|report| {
                 let error = report.result.as_ref().err()?;
-                Some(format!(
-                    "取得に失敗：{}（{}）",
-                    report.workspace,
-                    shorten(error)
+                Some(l10n::format(
+                    l10n::WORKSPACE_FETCH_FAILED,
+                    &[&report.workspace, &shorten(error)],
                 ))
             })
             .collect(),
@@ -260,7 +257,7 @@ mod tests {
                 },
                 Entry::Separator,
                 Entry::DismissAll,
-                Entry::Info("取得 10/28 19:05".into()),
+                Entry::Info("Fetched 10/28 19:05".into()),
             ]
         );
         assert_eq!(menu.entries[6..], footer());
@@ -332,7 +329,7 @@ mod tests {
                 Entry::Header("Home 株式会社".into()),
                 Entry::NoItems,
                 Entry::Separator,
-                Entry::Info("取得 10/28 19:05".into()),
+                Entry::Info("Fetched 10/28 19:05".into()),
             ]
         );
     }
@@ -348,9 +345,9 @@ mod tests {
         assert_eq!(
             menu.entries[..3],
             [
-                Entry::Info("メンションと DM はありません".into()),
+                Entry::Info("No mentions or DMs".into()),
                 Entry::Separator,
-                Entry::Info("取得 10/28 19:05".into()),
+                Entry::Info("Fetched 10/28 19:05".into()),
             ]
         );
     }
@@ -365,7 +362,7 @@ mod tests {
 
         assert_eq!(
             menu.entries[2],
-            Entry::Info("まだ取得できていません".into())
+            Entry::Info("Not fetched yet".into())
         );
     }
 
@@ -377,7 +374,7 @@ mod tests {
         assert_eq!(
             menu.entries[..2],
             [
-                Entry::Info("キャッシュがありません".into()),
+                Entry::Info("No cache".into()),
                 Entry::Separator,
             ]
         );
@@ -386,11 +383,11 @@ mod tests {
 
     #[test]
     fn shows_failures_before_fetch_now() {
-        let failures = ["取得に失敗：home（x）".to_owned()];
+        let failures = ["Fetch failed: home（x）".to_owned()];
 
         let menu = build_with(None, &Dismissed::new(), &failures, LoginState::Off, &home());
 
-        assert_eq!(menu.entries[2], Entry::Info("取得に失敗：home（x）".into()));
+        assert_eq!(menu.entries[2], Entry::Info("Fetch failed: home（x）".into()));
         assert_eq!(menu.entries[3..], footer());
     }
 
@@ -504,7 +501,7 @@ mod tests {
 
         assert_eq!(
             failure_lines(&reports),
-            ["取得に失敗：work（auth.test を呼び出せませんでした: timed out）"]
+            ["Fetch failed: work (auth.test を呼び出せませんでした: timed out)"]
         );
     }
 
@@ -514,7 +511,7 @@ mod tests {
 
         assert_eq!(
             failure_lines(&result),
-            [format!("取得に失敗：{}…", "あ".repeat(FAILURE_CHARS))]
+            [format!("Fetch failed: {}…", "あ".repeat(FAILURE_CHARS))]
         );
     }
 }

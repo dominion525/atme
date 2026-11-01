@@ -167,9 +167,9 @@ define_class!(
             if let Err(error) = result {
                 UI.with(|ui| {
                     if let Some(ui) = ui.borrow_mut().as_mut() {
-                        ui.failures.push(format!(
-                            "ログイン時の起動を切り替えられませんでした（{}）",
-                            error.localizedDescription()
+                        ui.failures.push(l10n::format(
+                            l10n::LOGIN_TOGGLE_FAILED,
+                            &[&error.localizedDescription().to_string()],
                         ));
                     }
                 });
@@ -499,22 +499,24 @@ fn menu_item(entry: &Entry, ui: &Ui, mtm: MainThreadMarker) -> Retained<NSMenuIt
             item
         }
         Entry::NoItems => {
-            let item = new_item("なし", None, mtm);
+            let item = new_item(&l10n::text(l10n::NONE), None, mtm);
             item.setIndentationLevel(1);
             item.setEnabled(false);
             item
         }
         Entry::DismissAll => {
-            let item = new_item("すべて既読にする", Some(sel!(dismissAll:)), mtm);
+            let item = new_item(&l10n::text(l10n::MARK_ALL_AS_READ), Some(sel!(dismissAll:)), mtm);
             unsafe { item.setTarget(Some(target)) };
             item
         }
         Entry::Fetch(button) => {
             let title = match button {
-                FetchButton::Ready => "今すぐ取得".to_owned(),
-                FetchButton::Cooldown(seconds) => format!("今すぐ取得（あと {seconds} 秒）"),
-                FetchButton::Waiting => "取得待機中".to_owned(),
-                FetchButton::Fetching => "取得中…".to_owned(),
+                FetchButton::Ready => l10n::text(l10n::FETCH_NOW),
+                FetchButton::Cooldown(seconds) => {
+                    l10n::format(l10n::FETCH_NOW_IN, &[&seconds.to_string()])
+                },
+                FetchButton::Waiting => l10n::text(l10n::WAITING_TO_FETCH),
+                FetchButton::Fetching => l10n::text(l10n::FETCHING),
             };
             let item = new_item(&title, Some(sel!(fetchNow:)), mtm);
             item.setEnabled(*button == FetchButton::Ready);
@@ -523,10 +525,10 @@ fn menu_item(entry: &Entry, ui: &Ui, mtm: MainThreadMarker) -> Retained<NSMenuIt
         }
         Entry::LaunchAtLogin(state) => {
             let title = match state {
-                LoginState::NeedsApproval => "ログイン時に起動（システム設定で承認が必要）",
-                LoginState::On | LoginState::Off => "ログイン時に起動",
+                LoginState::NeedsApproval => l10n::text(l10n::OPEN_AT_LOGIN_NEEDS_APPROVAL),
+                LoginState::On | LoginState::Off => l10n::text(l10n::OPEN_AT_LOGIN),
             };
-            let item = new_item(title, Some(sel!(toggleLogin:)), mtm);
+            let item = new_item(&title, Some(sel!(toggleLogin:)), mtm);
             if *state == LoginState::On {
                 item.setState(NSControlStateValueOn);
             }

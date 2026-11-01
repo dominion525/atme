@@ -14,6 +14,7 @@ use objc2_user_notifications::{
 
 use crate::app;
 use crate::display;
+use crate::l10n;
 use crate::state::{Item, Users};
 
 pub const PERMALINK_KEY: &str = "permalink";
@@ -123,7 +124,7 @@ fn plan(items: &[Item], users: &Users, teams: &BTreeMap<String, String>) -> Vec<
             identifier: format!("summary/{}", items[0].ts),
             title: "atme".into(),
             subtitle: None,
-            message: format!("ほか {} 件の新着があります", items.len() - MAX_INDIVIDUAL),
+            message: l10n::format(l10n::AND_MORE, &[&(items.len() - MAX_INDIVIDUAL).to_string()]),
             open: None,
         });
     }
@@ -188,7 +189,7 @@ mod tests {
             identifier: "summary/1.0".into(),
             title: "atme".into(),
             subtitle: None,
-            message: "ほか 2 件の新着があります".into(),
+            message: "And 2 more".into(),
             open: None,
         };
 
@@ -209,7 +210,7 @@ mod tests {
 
         assert_eq!(planned.len(), MAX_INDIVIDUAL + 1);
         assert_eq!(planned[0].identifier, "summary/100.0");
-        assert_eq!(planned[0].message, "ほか 2 件の新着があります");
+        assert_eq!(planned[0].message, "And 2 more");
         assert_eq!(planned[0].open, None);
         assert_eq!(
             planned[MAX_INDIVIDUAL].open,
