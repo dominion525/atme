@@ -219,8 +219,8 @@
 /* ウインドウ：手順 1。右に「Slack App を作る…」のボタンが並ぶ */
 "1. Create a Slack App for each workspace" = "1. Créez une Slack App pour chaque espace de travail";
 
-/* ウインドウ：手順 2（Install to Workspace と User OAuth Token は Slack の画面の表記のまま） */
-"2. On Slack, click Install to Workspace and copy the User OAuth Token" = "2. Sur Slack, cliquez sur Install to Workspace et copiez le User OAuth Token";
+/* ウインドウ：手順 2（Install to Workspace は Slack の画面の表記のまま） */
+"2. Click Install to Workspace and copy the token" = "2. Cliquez sur Install to Workspace et copiez le token";
 
 /* ウインドウ：手順 3。下に token の入力欄と「追加」が並ぶ */
 "3. Paste the copied token and add it" = "3. Collez le token copié et ajoutez-le";

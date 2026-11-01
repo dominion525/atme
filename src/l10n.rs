@@ -85,7 +85,7 @@ pub const REMOVE_CONFIRM_DETAIL: &str = "The token is also deleted from the Keyc
 pub const CANCEL: &str = "Cancel";
 pub const NO_WORKSPACES: &str = "No workspaces";
 pub const STEP_CREATE: &str = "1. Create a Slack App for each workspace";
-pub const STEP_INSTALL: &str = "2. On Slack, click Install to Workspace and copy the User OAuth Token";
+pub const STEP_INSTALL: &str = "2. Click Install to Workspace and copy the token";
 pub const STEP_PASTE: &str = "3. Paste the copied token and add it";
 pub const CREATE_SLACK_APP: &str = "Create Slack App…";
 
