@@ -19,6 +19,12 @@ pub fn location(item: &Item, teams: &BTreeMap<String, String>) -> String {
     )
 }
 
+/// 表示する送り主。1 対 1 の DM で、送り主が場所に出る相手と同じなら、重なるので出さない
+pub fn sender(item: &Item) -> Option<&str> {
+    let name = item.user_name.as_deref()?;
+    (!(item.is_im && item.peer_name.as_deref() == Some(name))).then_some(name)
+}
+
 pub fn format_time<Tz: TimeZone>(tz: &Tz, seconds: i64, pattern: &str) -> String
 where
     Tz::Offset: Display,
@@ -178,6 +184,24 @@ pub mod tests {
 
         assert_eq!(workspace_name(&teams, "home"), "Home 株式会社");
         assert_eq!(workspace_name(&teams, "work"), "work");
+    }
+
+    #[test]
+    fn omits_the_sender_only_when_a_dm_names_them_already() {
+        let mut dm = item("D1", "1793181600.000100");
+        dm.is_im = true;
+        dm.peer_name = Some("佐藤".into());
+        dm.user_name = Some("佐藤".into());
+        assert_eq!(sender(&dm), None);
+
+        // DM でも、相手以外（アプリなど）からなら出す
+        dm.user_name = Some("Reminder".into());
+        assert_eq!(sender(&dm), Some("Reminder"));
+
+        let mut group = item("G1", "1793181600.000100");
+        group.is_mpim = true;
+        group.user_name = Some("伊藤".into());
+        assert_eq!(sender(&group), Some("伊藤"));
     }
 
     #[test]

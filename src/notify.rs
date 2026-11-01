@@ -134,7 +134,7 @@ fn plan(items: &[Item], users: &Users, teams: &BTreeMap<String, String>) -> Vec<
         Notification {
             identifier: format!("{}/{}/{}", item.workspace, item.channel_id, item.ts),
             title: display::location(item, teams),
-            subtitle: item.user_name.clone(),
+            subtitle: display::sender(item).map(str::to_owned),
             message: display::summary(&item.text, names, MESSAGE_CHARS),
             open: Some(item.permalink.clone()),
         }

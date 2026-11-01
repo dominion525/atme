@@ -113,7 +113,7 @@ where
                         .iter()
                         .filter(|item| item.workspace == *workspace)
                         .map(|item| {
-                            let sender = match &item.user_name {
+                            let sender = match display::sender(item) {
                                 Some(name) => format!("  {name}"),
                                 None => String::new(),
                             };
@@ -259,7 +259,7 @@ mod tests {
             [
                 Entry::Header("Home 株式会社".into()),
                 Entry::Message {
-                    label: "DM 相手  相手: @自分 a|b 次の行".into(),
+                    label: "DM 相手: @自分 a|b 次の行".into(),
                     permalink: DM.into(),
                 },
                 Entry::Message {
