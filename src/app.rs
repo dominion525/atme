@@ -11,7 +11,7 @@ use objc2::rc::{Allocated, Retained};
 use objc2::runtime::{AnyClass, AnyObject, Bool, ProtocolObject, Sel};
 use objc2::{define_class, msg_send, sel, AnyThread, DefinedClass, MainThreadOnly, Message};
 use objc2_app_kit::{
-    NSApplication, NSBackingStoreType, NSButton, NSCellImagePosition, NSControlStateValueOn, NSFont, NSImage,
+    NSAlert, NSAlertSecondButtonReturn, NSAlertStyle, NSApplication, NSModalResponse, NSBackingStoreType, NSButton, NSCellImagePosition, NSControlStateValueOn, NSFont, NSImage,
     NSMenu, NSMenuDelegate, NSMenuItem, NSSecureTextField, NSStatusBar, NSStatusItem, NSTextField,
     NSUserInterfaceItemIdentification, NSVariableStatusItemLength, NSView, NSWindow, NSWindowStyleMask,
     NSWorkspace, NSWorkspaceDidWakeNotification,
@@ -237,20 +237,10 @@ define_class!(
 
         #[unsafe(method(removeWorkspace:))]
         fn remove_workspace(&self, sender: &NSButton) {
-            let Some(name) = sender.identifier() else {
+            let Some(name) = sender.identifier().map(|name| name.to_string()) else {
                 return;
             };
-            let status = match setup::remove(&name.to_string()) {
-                Ok(()) => String::new(),
-                Err(error) => format!("{error:#}"),
-            };
-            UI.with(|ui| {
-                if let Some(ui) = ui.borrow_mut().as_mut() {
-                    ui.setup_status = status;
-                }
-            });
-            show_workspaces();
-            let _ = self.ivars().send(());
+            confirm_removal(name, self.ivars().clone());
         }
 
         #[unsafe(method(quit:))]
@@ -680,6 +670,53 @@ fn install_edit_menu(app: &NSApplication, mtm: MainThreadMarker) {
     edit_item.setSubmenu(Some(&edit));
     main.addItem(&edit_item);
     app.setMainMenu(Some(&main));
+}
+
+/// 「削除」を押したときに、ワークスペースのウインドウに確認のシートを出す。
+/// 「削除」を選んだときだけ外す。既定のボタン（Return）と Esc は「キャンセル」
+fn confirm_removal(name: String, trigger: Sender<()>) {
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let Some(window) = UI.with(|ui| ui.borrow().as_ref().and_then(|ui| ui.window.clone())) else {
+        return;
+    };
+    let shown = Store::open()
+        .ok()
+        .and_then(|store| store.load_cache().ok().flatten())
+        .and_then(|cache| cache.teams.get(&name).cloned())
+        .unwrap_or_else(|| name.clone());
+    let alert = NSAlert::new(mtm);
+    alert.setAlertStyle(NSAlertStyle::Warning);
+    alert.setMessageText(&NSString::from_str(&l10n::format(l10n::REMOVE_CONFIRM, &[&shown])));
+    alert.setInformativeText(&NSString::from_str(&l10n::text(l10n::REMOVE_CONFIRM_DETAIL)));
+    // 先に足したボタンが右端の既定のボタンになる。消すのは取り返しがつかないので、既定は「キャンセル」にする
+    let cancel = alert.addButtonWithTitle(&NSString::from_str(&l10n::text(l10n::CANCEL)));
+    cancel.setKeyEquivalent(ns_string!("\r"));
+    let remove = alert.addButtonWithTitle(&NSString::from_str(&l10n::text(l10n::REMOVE)));
+    remove.setKeyEquivalent(ns_string!(""));
+    remove.setHasDestructiveAction(true);
+    let handler = RcBlock::new(move |response: NSModalResponse| {
+        if response == NSAlertSecondButtonReturn {
+            remove_now(&name, &trigger);
+        }
+    });
+    alert.beginSheetModalForWindow_completionHandler(&window, Some(&handler));
+}
+
+/// 設定ファイルと Keychain から外し、ウインドウを作り直して取得し直す
+fn remove_now(name: &str, trigger: &Sender<()>) {
+    let status = match setup::remove(name) {
+        Ok(()) => String::new(),
+        Err(error) => format!("{error:#}"),
+    };
+    UI.with(|ui| {
+        if let Some(ui) = ui.borrow_mut().as_mut() {
+            ui.setup_status = status;
+        }
+    });
+    show_workspaces();
+    let _ = trigger.send(());
 }
 
 /// ワークスペースのウインドウを開いて前に出す

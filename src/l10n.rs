@@ -84,6 +84,9 @@ pub const ADDED_WORKSPACES: &str = "Added Workspaces";
 pub const ADD_WORKSPACE: &str = "Add a Workspace";
 pub const NO_WORKSPACES_MENU: &str = "No workspaces. Add one from Workspaces…";
 pub const WORKSPACE_NOT_TABLES: &str = "workspace must be written as [[workspace]]";
+pub const REMOVE_CONFIRM: &str = "Remove %@?";
+pub const REMOVE_CONFIRM_DETAIL: &str = "The token is also deleted from the Keychain. You can add the workspace again by pasting the same token.";
+pub const CANCEL: &str = "Cancel";
 
 /// コードで使うキーの一覧。すべて ja.lproj に訳があることをテストで確かめる
 #[cfg_attr(not(test), allow(dead_code))]
@@ -159,6 +162,9 @@ pub const KEYS: &[&str] = &[
     ADD_WORKSPACE,
     NO_WORKSPACES_MENU,
     WORKSPACE_NOT_TABLES,
+    REMOVE_CONFIRM,
+    REMOVE_CONFIRM_DETAIL,
+    CANCEL,
 ];
 
 /// key の訳を、macOS が選んだ言語で引く

@@ -212,3 +212,12 @@
 
 /* 設定ファイルの workspace が [[workspace]] の表になっていない */
 "workspace must be written as [[workspace]]" = "workspace doit être écrit sous la forme [[workspace]]";
+
+/* 削除の確認の題。%@ はワークスペース名 */
+"Remove %@?" = "Supprimer %@ ?";
+
+/* 削除の確認の説明 */
+"The token is also deleted from the Keychain. You can add the workspace again by pasting the same token." = "Le token est aussi supprimé du trousseau. Vous pourrez rajouter l’espace de travail en collant le même token.";
+
+/* 削除の確認：何もしないボタン */
+"Cancel" = "Annuler";
