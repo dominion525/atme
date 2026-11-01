@@ -55,6 +55,8 @@ pub enum Entry {
     Separator,
     DismissAll,
     Fetch(FetchButton),
+    /// ワークスペースの追加・削除のウインドウを開く
+    Workspaces,
     LaunchAtLogin(LoginState),
     /// Sparkle の「アップデートを確認…」
     CheckForUpdates,
@@ -153,6 +155,7 @@ where
     };
     entries.extend(inputs.failures.iter().cloned().map(Entry::Info));
     entries.push(Entry::Fetch(inputs.fetch));
+    entries.push(Entry::Workspaces);
     entries.push(Entry::LaunchAtLogin(inputs.login));
     if inputs.updates {
         entries.push(Entry::CheckForUpdates);
@@ -223,9 +226,10 @@ mod tests {
         vec!["home".to_owned()]
     }
 
-    fn footer() -> [Entry; 4] {
+    fn footer() -> [Entry; 5] {
         [
             Entry::Fetch(FetchButton::Ready),
+            Entry::Workspaces,
             Entry::LaunchAtLogin(LoginState::Off),
             Entry::Separator,
             Entry::Quit,

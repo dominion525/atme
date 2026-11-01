@@ -13,6 +13,7 @@ mod menu;
 mod notify;
 mod read;
 mod scheduler;
+mod setup;
 mod slack;
 mod state;
 

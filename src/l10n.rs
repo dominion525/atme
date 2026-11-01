@@ -29,7 +29,6 @@ pub const INVALID_CONTENTS: &str = "The contents of %@ are invalid";
 pub const NO_WORKSPACE: &str = "No [[workspace]] is configured";
 pub const DUPLICATE_WORKSPACE: &str = "Workspace name %@ is duplicated";
 pub const HOME_NOT_SET: &str = "HOME is not set";
-pub const SECURITY_FAILED: &str = "Couldn't run the security command";
 pub const KEYCHAIN_READ_FAILED: &str =
     "Couldn't read service=%1$@ account=%2$@ from the Keychain: %3$@";
 pub const KEYCHAIN_NOT_UTF8: &str = "The value of account=%@ in the Keychain isn't UTF-8";
@@ -69,6 +68,23 @@ pub const NOTIFICATION_NO_RESPONSE: &str = "No response to the notification requ
 pub const NO_CACHE_RUN_FETCH: &str = "No cache. Run atme fetch";
 pub const FETCH_COUNTS: &str = "%1$@: %2$@ total, %3$@ new";
 
+// ワークスペースの追加と削除
+pub const KEYCHAIN_WRITE_FAILED: &str = "Couldn't save service=%1$@ account=%2$@ to the Keychain";
+pub const KEYCHAIN_DELETE_FAILED: &str = "Couldn't delete service=%1$@ account=%2$@ from the Keychain";
+pub const ALREADY_ADDED: &str = "%@ has already been added";
+pub const NOT_USER_TOKEN: &str = "Paste a User OAuth Token that starts with xoxp-";
+pub const NO_WORKSPACE_URL: &str = "auth.test didn't return the workspace URL";
+pub const WORKSPACES: &str = "Workspaces…";
+pub const WORKSPACES_TITLE: &str = "Workspaces";
+pub const REMOVE: &str = "Remove";
+pub const ADD: &str = "Add";
+pub const TOKEN_LABEL: &str = "User OAuth Token";
+pub const CHECKING: &str = "Checking…";
+pub const ADDED: &str = "Added %@";
+pub const NO_WORKSPACES_YET: &str = "No workspaces yet. Paste a token to add one.";
+pub const ADDED_WORKSPACES: &str = "Added Workspaces";
+pub const ADD_WORKSPACE: &str = "Add a Workspace";
+
 /// コードで使うキーの一覧。すべて ja.lproj に訳があることをテストで確かめる
 #[cfg_attr(not(test), allow(dead_code))]
 pub const KEYS: &[&str] = &[
@@ -97,7 +113,6 @@ pub const KEYS: &[&str] = &[
     NO_WORKSPACE,
     DUPLICATE_WORKSPACE,
     HOME_NOT_SET,
-    SECURITY_FAILED,
     KEYCHAIN_READ_FAILED,
     KEYCHAIN_NOT_UTF8,
     CHANNEL_READ_STATE_FAILED,
@@ -129,6 +144,21 @@ pub const KEYS: &[&str] = &[
     NOTIFICATION_NO_RESPONSE,
     NO_CACHE_RUN_FETCH,
     FETCH_COUNTS,
+    KEYCHAIN_WRITE_FAILED,
+    KEYCHAIN_DELETE_FAILED,
+    ALREADY_ADDED,
+    NOT_USER_TOKEN,
+    NO_WORKSPACE_URL,
+    WORKSPACES,
+    WORKSPACES_TITLE,
+    REMOVE,
+    ADD,
+    TOKEN_LABEL,
+    CHECKING,
+    ADDED,
+    NO_WORKSPACES_YET,
+    ADDED_WORKSPACES,
+    ADD_WORKSPACE,
 ];
 
 /// key の訳を、macOS が選んだ言語で引く

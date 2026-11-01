@@ -43,6 +43,9 @@ pub struct Client {
 pub struct AuthTest {
     pub user_id: String,
     pub team: String,
+    /// ワークスペースの URL（https://xxx.slack.com/）
+    #[serde(default)]
+    pub url: String,
 }
 
 #[derive(Debug, Deserialize)]

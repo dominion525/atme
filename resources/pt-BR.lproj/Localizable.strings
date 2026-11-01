@@ -75,9 +75,6 @@
 /* 環境変数 HOME が無い */
 "HOME is not set" = "HOME não está definido";
 
-/* Keychain を読む security コマンドを動かせない */
-"Couldn't run the security command" = "Não foi possível executar o comando security";
-
 /* Keychain に token が無いなど。%3$@ は security コマンドの出力 */
 "Couldn't read service=%1$@ account=%2$@ from the Keychain: %3$@" = "Não foi possível ler service=%1$@ account=%2$@ das Chaves: %3$@";
 
@@ -170,3 +167,48 @@
 
 /* CLI：atme fetch のワークスペースごとの結果。%1$@ はワークスペース名、%2$@ は一覧の件数、%3$@ は新着の件数 */
 "%1$@: %2$@ total, %3$@ new" = "%1$@: %2$@ no total, %3$@ novos";
+
+/* token を Keychain に保存できない */
+"Couldn't save service=%1$@ account=%2$@ to the Keychain" = "Não foi possível salvar service=%1$@ account=%2$@ nas Chaves";
+
+/* token を Keychain から消せない */
+"Couldn't delete service=%1$@ account=%2$@ from the Keychain" = "Não foi possível apagar service=%1$@ account=%2$@ das Chaves";
+
+/* 同じワークスペースを 2 回足そうとした。%@ はワークスペース名 */
+"%@ has already been added" = "%@ já foi adicionado";
+
+/* 入れた値が user token ではない */
+"Paste a User OAuth Token that starts with xoxp-" = "Cole um User OAuth Token que comece com xoxp-";
+
+/* Slack の応答にワークスペースの URL が無い */
+"auth.test didn't return the workspace URL" = "auth.test não retornou a URL do workspace";
+
+/* メニュー：ワークスペースの追加・削除のウインドウを開く */
+"Workspaces…" = "Workspaces…";
+
+/* ウインドウの題 */
+"Workspaces" = "Workspaces";
+
+/* ウインドウ：ワークスペースを外すボタン */
+"Remove" = "Remover";
+
+/* ウインドウ：token を確かめて足すボタン */
+"Add" = "Adicionar";
+
+/* ウインドウ：token の入力欄の見出し（Slack の画面の表記に合わせて訳さない） */
+"User OAuth Token" = "User OAuth Token";
+
+/* ウインドウ：token を確かめているとき */
+"Checking…" = "Verificando…";
+
+/* ウインドウ：追加できたとき。%@ はワークスペース名 */
+"Added %@" = "%@ adicionado";
+
+/* ウインドウ：ワークスペースが 1 つも無いとき */
+"No workspaces yet. Paste a token to add one." = "Nenhum workspace ainda. Cole um token para adicionar.";
+
+/* ウインドウ：追加済みのワークスペースの一覧の見出し */
+"Added Workspaces" = "Workspaces adicionados";
+
+/* ウインドウ：token を入れて足す欄の見出し */
+"Add a Workspace" = "Adicionar um workspace";
