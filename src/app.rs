@@ -341,15 +341,22 @@ pub fn run() -> Result<()> {
     center.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
     request_authorization(&center);
 
-    let (trigger, _worker) = scheduler::spawn(
-        FETCH_INTERVAL,
-        FETCH_MIN_GAP,
-        || {
-            let failures = menu::failure_lines(&fetch::fetch_once());
-            DispatchQueue::main().exec_async(move || on_fetched(failures));
-        },
-        |phase| DispatchQueue::main().exec_async(move || on_phase(phase)),
-    );
+    // ATME_NO_FETCH があるときは取得しない。README の画像を、見本のキャッシュだけで撮るため
+    let (trigger, _worker) = if std::env::var_os("ATME_NO_FETCH").is_some() {
+        let (trigger, _ignored) = std::sync::mpsc::channel();
+        (trigger, None)
+    } else {
+        let (trigger, worker) = scheduler::spawn(
+            FETCH_INTERVAL,
+            FETCH_MIN_GAP,
+            || {
+                let failures = menu::failure_lines(&fetch::fetch_once());
+                DispatchQueue::main().exec_async(move || on_fetched(failures));
+            },
+            |phase| DispatchQueue::main().exec_async(move || on_phase(phase)),
+        );
+        (trigger, Some(worker))
+    };
     let target = MenuTarget::new(mtm, trigger);
     let observer: &AnyObject = &target;
     unsafe {
