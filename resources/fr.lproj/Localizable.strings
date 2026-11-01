@@ -167,3 +167,6 @@
 
 /* CLI：atme list でキャッシュが無い */
 "No cache. Run atme fetch" = "Aucun cache. Exécutez atme fetch";
+
+/* CLI：atme fetch のワークスペースごとの結果。%1$@ はワークスペース名、%2$@ は一覧の件数、%3$@ は新着の件数 */
+"%1$@: %2$@ total, %3$@ new" = "%1$@ : %2$@ au total, %3$@ nouveaux";

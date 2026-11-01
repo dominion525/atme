@@ -67,6 +67,7 @@ pub const NOTIFICATION_SETTINGS_UNREADABLE: &str =
 pub const NOTIFY_FAILED: &str = "Couldn't send a notification: %@";
 pub const NOTIFICATION_NO_RESPONSE: &str = "No response to the notification request";
 pub const NO_CACHE_RUN_FETCH: &str = "No cache. Run atme fetch";
+pub const FETCH_COUNTS: &str = "%1$@: %2$@ total, %3$@ new";
 
 /// コードで使うキーの一覧。すべて ja.lproj に訳があることをテストで確かめる
 #[cfg_attr(not(test), allow(dead_code))]
@@ -127,6 +128,7 @@ pub const KEYS: &[&str] = &[
     NOTIFY_FAILED,
     NOTIFICATION_NO_RESPONSE,
     NO_CACHE_RUN_FETCH,
+    FETCH_COUNTS,
 ];
 
 /// key の訳を、macOS が選んだ言語で引く

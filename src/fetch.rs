@@ -32,8 +32,15 @@ pub fn run() -> Result<()> {
     for report in fetch_once()? {
         match report.result {
             Ok(counts) => println!(
-                "{}: {} 件、新着 {} 件",
-                report.workspace, counts.total, counts.new
+                "{}",
+                l10n::format(
+                    l10n::FETCH_COUNTS,
+                    &[
+                        &report.workspace,
+                        &counts.total.to_string(),
+                        &counts.new.to_string(),
+                    ],
+                )
             ),
             Err(error) => {
                 eprintln!("{}: {error}", report.workspace);

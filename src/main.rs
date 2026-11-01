@@ -19,19 +19,19 @@ mod state;
 #[derive(Parser)]
 #[command(
     version,
-    about = "Slack の自分宛メンションと DM を見落とさないためのツール"
+    about = "Never miss Slack mentions and DMs addressed to you"
 )]
 struct Cli {
-    /// 省略するとメニューバーに常駐する（atme.app を open したときの動き）
+    /// Stays in the menu bar when omitted (what happens when atme.app is opened)
     #[command(subcommand)]
     command: Option<Command>,
 }
 
 #[derive(Subcommand)]
 enum Command {
-    /// メンションと DM を取得し、差分を取ってキャッシュに保存する
+    /// Fetches mentions and DMs, finds the new ones, and saves the cache
     Fetch,
-    /// キャッシュから一覧を表示する（Slack の API は呼ばない）
+    /// Shows the list from the cache (doesn't call the Slack API)
     List,
 }
 
