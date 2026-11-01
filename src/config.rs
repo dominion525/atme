@@ -30,16 +30,21 @@ fn default_days() -> u32 {
 impl Config {
     pub fn load() -> Result<Self> {
         let path = path()?;
-        let text = std::fs::read_to_string(&path)
-            .with_context(|| l10n::format(l10n::READ_FAILED, &[&path.display().to_string()]))?;
+        // 設定ファイルがまだ無いのは、ワークスペースを 1 つも足していないとき
+        let text = match std::fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    l10n::format(l10n::READ_FAILED, &[&path.display().to_string()])
+                });
+            }
+        };
         Self::parse(&text).with_context(|| l10n::format(l10n::INVALID_CONTENTS, &[&path.display().to_string()]))
     }
 
     fn parse(text: &str) -> Result<Self> {
         let config: Config = toml::from_str(text)?;
-        if config.workspace.is_empty() {
-            bail!(l10n::text(l10n::NO_WORKSPACE));
-        }
         let mut names = HashSet::new();
         for workspace in &config.workspace {
             if !names.insert(workspace.name.as_str()) {
@@ -87,7 +92,7 @@ fn with_workspace(text: &str, name: &str) -> Result<String> {
         .entry("workspace")
         .or_insert(Item::ArrayOfTables(ArrayOfTables::new()))
         .as_array_of_tables_mut()
-        .with_context(|| l10n::text(l10n::NO_WORKSPACE))?;
+        .with_context(|| l10n::text(l10n::WORKSPACE_NOT_TABLES))?;
     if tables.iter().any(|table| table_name(table) == Some(name)) {
         bail!(l10n::format(l10n::ALREADY_ADDED, &[name]));
     }
@@ -208,8 +213,16 @@ mod tests {
     }
 
     #[test]
-    fn rejects_no_workspace() {
-        assert!(Config::parse("days = 7").is_err());
+    fn accepts_no_workspace() {
+        assert_eq!(Config::parse("days = 7").unwrap().workspace.len(), 0);
+        assert_eq!(Config::parse("").unwrap().days, 7);
+    }
+
+    #[test]
+    fn refuses_to_add_when_workspace_is_not_tables() {
+        let error = with_workspace("workspace = 1\n", "home").unwrap_err();
+
+        assert_eq!(error.to_string(), "workspace must be written as [[workspace]]");
     }
 
     #[test]

@@ -134,18 +134,24 @@ where
                 }
             }
             if workspaces.is_empty() {
-                entries.push(Entry::Info(l10n::text(l10n::NOTHING)));
+                entries.push(Entry::Info(l10n::text(l10n::NO_WORKSPACES_MENU)));
             }
             entries.push(Entry::Separator);
             if !items.is_empty() {
                 entries.push(Entry::DismissAll);
             }
+            // ワークスペースが無ければ取得するものも無いので、取得時刻は出さない。
             // 取得時刻は、1 度も成功していなければ 0 のまま
-            entries.push(Entry::Info(if cache.fetched_at == 0 {
-                l10n::text(l10n::NOT_FETCHED_YET)
-            } else {
-                l10n::format(l10n::FETCHED_AT, &[&display::format_time(tz, cache.fetched_at, "%m/%d %H:%M")])
-            }));
+            if !workspaces.is_empty() {
+                entries.push(Entry::Info(if cache.fetched_at == 0 {
+                    l10n::text(l10n::NOT_FETCHED_YET)
+                } else {
+                    l10n::format(
+                        l10n::FETCHED_AT,
+                        &[&display::format_time(tz, cache.fetched_at, "%m/%d %H:%M")],
+                    )
+                }));
+            }
             if items.is_empty() {
                 String::new()
             } else {
@@ -339,21 +345,22 @@ mod tests {
     }
 
     #[test]
-    fn says_nothing_when_no_workspace_is_known() {
+    fn asks_to_add_a_workspace_when_there_is_none() {
         let mut empty = cache();
         empty.items.clear();
 
         let menu = build_with(Some(&empty), &Dismissed::new(), &[], LoginState::Off, &[]);
 
         assert_eq!(menu.badge, "");
+        // 取得時刻は出さず、すぐ後ろに取得のボタンなどが続く
         assert_eq!(
-            menu.entries[..3],
+            menu.entries[..2],
             [
-                Entry::Info("No mentions or DMs".into()),
+                Entry::Info("No workspaces. Add one from Workspaces…".into()),
                 Entry::Separator,
-                Entry::Info("Fetched 10/28 19:05".into()),
             ]
         );
+        assert_eq!(menu.entries[2..], footer());
     }
 
     #[test]
@@ -362,10 +369,10 @@ mod tests {
         never.items.clear();
         never.fetched_at = 0;
 
-        let menu = build_with(Some(&never), &Dismissed::new(), &[], LoginState::Off, &[]);
+        let menu = build_with(Some(&never), &Dismissed::new(), &[], LoginState::Off, &home());
 
         assert_eq!(
-            menu.entries[2],
+            menu.entries[3],
             Entry::Info("Not fetched yet".into())
         );
     }

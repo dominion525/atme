@@ -5,7 +5,6 @@ use objc2_foundation::{NSBundle, NSString};
 pub const QUIT: &str = "Quit";
 pub const CHECK_FOR_UPDATES: &str = "Check for Updates…";
 pub const NO_CACHE: &str = "No cache";
-pub const NOTHING: &str = "No mentions or DMs";
 pub const NOT_FETCHED_YET: &str = "Not fetched yet";
 pub const FETCHED_AT: &str = "Fetched %@";
 pub const FETCH_FAILED: &str = "Fetch failed: %@";
@@ -26,7 +25,6 @@ pub const NO_TEXT: &str = "(no text)";
 // エラー・案内の文
 pub const READ_FAILED: &str = "Couldn't read %@";
 pub const INVALID_CONTENTS: &str = "The contents of %@ are invalid";
-pub const NO_WORKSPACE: &str = "No [[workspace]] is configured";
 pub const DUPLICATE_WORKSPACE: &str = "Workspace name %@ is duplicated";
 pub const HOME_NOT_SET: &str = "HOME is not set";
 pub const KEYCHAIN_READ_FAILED: &str =
@@ -84,6 +82,8 @@ pub const ADDED: &str = "Added %@";
 pub const NO_WORKSPACES_YET: &str = "No workspaces yet. Paste a token to add one.";
 pub const ADDED_WORKSPACES: &str = "Added Workspaces";
 pub const ADD_WORKSPACE: &str = "Add a Workspace";
+pub const NO_WORKSPACES_MENU: &str = "No workspaces. Add one from Workspaces…";
+pub const WORKSPACE_NOT_TABLES: &str = "workspace must be written as [[workspace]]";
 
 /// コードで使うキーの一覧。すべて ja.lproj に訳があることをテストで確かめる
 #[cfg_attr(not(test), allow(dead_code))]
@@ -91,7 +91,6 @@ pub const KEYS: &[&str] = &[
     QUIT,
     CHECK_FOR_UPDATES,
     NO_CACHE,
-    NOTHING,
     NOT_FETCHED_YET,
     FETCHED_AT,
     FETCH_FAILED,
@@ -110,7 +109,6 @@ pub const KEYS: &[&str] = &[
     NO_TEXT,
     READ_FAILED,
     INVALID_CONTENTS,
-    NO_WORKSPACE,
     DUPLICATE_WORKSPACE,
     HOME_NOT_SET,
     KEYCHAIN_READ_FAILED,
@@ -159,6 +157,8 @@ pub const KEYS: &[&str] = &[
     NO_WORKSPACES_YET,
     ADDED_WORKSPACES,
     ADD_WORKSPACE,
+    NO_WORKSPACES_MENU,
+    WORKSPACE_NOT_TABLES,
 ];
 
 /// key の訳を、macOS が選んだ言語で引く

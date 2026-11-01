@@ -9,9 +9,6 @@
 /* メニュー：キャッシュのファイルが無いとき */
 "No cache" = "Aucun cache";
 
-/* メニュー：ワークスペースが 1 つも分からず、表示するものも無いとき */
-"No mentions or DMs" = "Aucune mention ni aucun message direct";
-
 /* メニュー：1 度も取得に成功していないとき */
 "Not fetched yet" = "Pas encore récupéré";
 
@@ -65,9 +62,6 @@
 
 /* 設定や状態のファイルの中身が読み取れない。%@ はファイルのパス */
 "The contents of %@ are invalid" = "Le contenu de %@ n’est pas valide";
-
-/* 設定ファイルにワークスペースが無い */
-"No [[workspace]] is configured" = "Aucun [[workspace]] n’est configuré";
 
 /* 設定ファイルで同じ name が 2 回ある。%@ は name */
 "Workspace name %@ is duplicated" = "Le nom d’espace de travail %@ est en double";
@@ -212,3 +206,9 @@
 
 /* ウインドウ：token を入れて足す欄の見出し */
 "Add a Workspace" = "Ajouter un espace de travail";
+
+/* メニュー：ワークスペースが 1 つも無いとき。「ワークスペース…」はメニューの項目名に合わせる */
+"No workspaces. Add one from Workspaces…" = "Aucun espace de travail. Ajoutez-en un depuis « Espaces de travail… »";
+
+/* 設定ファイルの workspace が [[workspace]] の表になっていない */
+"workspace must be written as [[workspace]]" = "workspace doit être écrit sous la forme [[workspace]]";

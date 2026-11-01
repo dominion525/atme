@@ -9,9 +9,6 @@
 /* メニュー：キャッシュのファイルが無いとき */
 "No cache" = "沒有快取";
 
-/* メニュー：ワークスペースが 1 つも分からず、表示するものも無いとき */
-"No mentions or DMs" = "沒有提及或私訊";
-
 /* メニュー：1 度も取得に成功していないとき */
 "Not fetched yet" = "尚未取得";
 
@@ -65,9 +62,6 @@
 
 /* 設定や状態のファイルの中身が読み取れない。%@ はファイルのパス */
 "The contents of %@ are invalid" = "%@ 的內容無效";
-
-/* 設定ファイルにワークスペースが無い */
-"No [[workspace]] is configured" = "未設定任何 [[workspace]]";
 
 /* 設定ファイルで同じ name が 2 回ある。%@ は name */
 "Workspace name %@ is duplicated" = "工作空間名稱 %@ 重複";
@@ -212,3 +206,9 @@
 
 /* ウインドウ：token を入れて足す欄の見出し */
 "Add a Workspace" = "加入工作空間";
+
+/* メニュー：ワークスペースが 1 つも無いとき。「ワークスペース…」はメニューの項目名に合わせる */
+"No workspaces. Add one from Workspaces…" = "沒有工作空間。請從「工作空間…」加入";
+
+/* 設定ファイルの workspace が [[workspace]] の表になっていない */
+"workspace must be written as [[workspace]]" = "workspace 必須寫成 [[workspace]] 的形式";
