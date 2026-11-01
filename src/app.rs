@@ -11,7 +11,7 @@ use objc2::rc::{Allocated, Retained};
 use objc2::runtime::{AnyClass, AnyObject, Bool, ProtocolObject, Sel};
 use objc2::{define_class, msg_send, sel, AnyThread, DefinedClass, MainThreadOnly, Message};
 use objc2_app_kit::{
-    NSAlert, NSAlertFirstButtonReturn, NSAlertSecondButtonReturn, NSAlertStyle, NSApplication, NSColor, NSModalResponse, NSBackingStoreType, NSButton, NSCellImagePosition, NSControlStateValueOn, NSFont, NSImage,
+    NSAlert, NSAlertFirstButtonReturn, NSAlertSecondButtonReturn, NSAlertStyle, NSApplication, NSBox, NSBoxType, NSColor, NSModalResponse, NSBackingStoreType, NSButton, NSCellImagePosition, NSControlStateValueOn, NSImage,
     NSMenu, NSMenuDelegate, NSMenuItem, NSSecureTextField, NSStatusBar, NSStatusItem, NSTextField,
     NSUserInterfaceItemIdentification, NSVariableStatusItemLength, NSView, NSWindow, NSWindowStyleMask,
     NSWorkspace, NSWorkspaceDidWakeNotification,
@@ -32,6 +32,7 @@ use crate::dismiss;
 use crate::fetch;
 use crate::l10n;
 use crate::login::{self, LoginState};
+use crate::manifest;
 use crate::menu::{self, Entry, FetchButton, Menu};
 use crate::notify::PERMALINK_KEY;
 use crate::scheduler::{self, Phase};
@@ -250,6 +251,14 @@ define_class!(
                 return;
             };
             confirm_removal(name, self.ivars().clone());
+        }
+
+        #[unsafe(method(createSlackApp:))]
+        fn create_slack_app(&self, _sender: &AnyObject) {
+            let url = manifest::create_app_url();
+            if let Some(url) = NSURL::URLWithString(&NSString::from_str(url.as_str())) {
+                NSWorkspace::sharedWorkspace().openURL(&url);
+            }
         }
 
         #[unsafe(method(closeWorkspaces:))]
@@ -841,9 +850,9 @@ fn show_workspaces() {
         };
         let target: &AnyObject = &ui.target;
         let text_width = WINDOW_WIDTH - MARGIN * 2.0;
-        let mut rows = vec![text_row(heading(&l10n::text(l10n::ADDED_WORKSPACES), mtm), text_width)];
+        let mut rows = Vec::new();
         if workspaces.is_empty() {
-            rows.push(text_row(label(&l10n::text(l10n::NO_WORKSPACES_YET), mtm), text_width));
+            rows.push(text_row(wrapping_label(&l10n::text(l10n::NO_WORKSPACES), mtm), text_width));
         }
         for name in &workspaces {
             // 設定の name は内部の名前なので、Slack 上の名前が分かればそちらだけを出す
@@ -852,11 +861,20 @@ fn show_workspaces() {
             remove.setIdentifier(Some(&NSString::from_str(name)));
             rows.push(button_row(&shown, remove));
         }
-        rows.push(text_row(heading(&l10n::text(l10n::ADD_WORKSPACE), mtm), text_width));
-        rows.push(text_row(label(&l10n::text(l10n::TOKEN_LABEL), mtm), text_width));
+        // 一覧と、足す手順のあいだの区切り
+        rows.push(separator_row(mtm));
+        // 先に Slack App を作り、そのあとで出てくる token を貼る、という順番が分かるよう、手順に番号を振って上から並べる
+        let create = button(&l10n::text(l10n::CREATE_SLACK_APP), sel!(createSlackApp:), target, mtm);
+        rows.push(button_row(&wrapping_label(&l10n::text(l10n::STEP_CREATE), mtm), create));
+        rows.push(text_row(wrapping_label(&l10n::text(l10n::STEP_INSTALL), mtm), text_width));
+        rows.push(text_row(wrapping_label(&l10n::text(l10n::STEP_PASTE), mtm), text_width));
         let field = ui
             .token_field
-            .get_or_insert_with(|| NSSecureTextField::new(mtm))
+            .get_or_insert_with(|| {
+                let field = NSSecureTextField::new(mtm);
+                field.setPlaceholderString(Some(ns_string!("xoxp-…")));
+                field
+            })
             .clone();
         let add = button(&l10n::text(l10n::ADD), sel!(addWorkspace:), target, mtm);
         // 確かめているあいだは、入力欄も「追加」も触れないようにする
@@ -865,10 +883,10 @@ fn show_workspaces() {
         add.setKeyEquivalent(ns_string!("\r"));
         rows.push(button_row(&field, add));
         let status = match &ui.setup_status {
-            Status::None => label("", mtm),
-            Status::Info(text) => label(text, mtm),
+            Status::None => wrapping_label("", mtm),
+            Status::Info(text) => wrapping_label(text, mtm),
             Status::Error(text) => {
-                let error = label(text, mtm);
+                let error = wrapping_label(text, mtm);
                 error.setTextColor(Some(&NSColor::systemRedColor()));
                 error
             }
@@ -918,6 +936,17 @@ fn show_workspaces() {
     });
 }
 
+/// 幅いっぱいの区切りの線の行
+fn separator_row(mtm: MainThreadMarker) -> Row {
+    let line = NSBox::new(mtm);
+    line.setBoxType(NSBoxType::Separator);
+    Row {
+        left: as_view(&line),
+        left_height: 1.0,
+        right: None,
+    }
+}
+
 /// 幅いっぱいの文の行。長い文は折り返し、その高さにする
 fn text_row(text: Retained<NSTextField>, width: f64) -> Row {
     text.setPreferredMaxLayoutWidth(width);
@@ -933,10 +962,15 @@ fn text_row(text: Retained<NSTextField>, width: f64) -> Row {
 fn button_row(left: &NSView, right: Retained<NSButton>) -> Row {
     right.sizeToFit();
     let right_size = right.frame().size;
-    let left_height = match left.downcast_ref::<NSSecureTextField>() {
+    let left_height = if left.downcast_ref::<NSSecureTextField>().is_some() {
         // 入力欄は文字が無いと高さが決まらないので、標準の高さにする
-        Some(_) => 22.0,
-        None => left.fittingSize().height,
+        22.0
+    } else {
+        // 文はボタンの左の幅で折り返し、その高さにする
+        if let Some(text) = left.downcast_ref::<NSTextField>() {
+            text.setPreferredMaxLayoutWidth(WINDOW_WIDTH - MARGIN * 2.0 - right_size.width - GAP);
+        }
+        left.fittingSize().height
     };
     Row {
         left: left.retain(),
@@ -970,14 +1004,15 @@ fn escape_button(target: &AnyObject, mtm: MainThreadMarker) -> Retained<NSButton
     escape
 }
 
-fn heading(text: &str, mtm: MainThreadMarker) -> Retained<NSTextField> {
-    let heading = label(text, mtm);
-    heading.setFont(Some(&NSFont::boldSystemFontOfSize(NSFont::systemFontSize())));
-    heading
-}
-
 fn label(text: &str, mtm: MainThreadMarker) -> Retained<NSTextField> {
     let label = NSTextField::labelWithString(&NSString::from_str(text), mtm);
+    label.setSelectable(true);
+    label
+}
+
+/// 幅に収まらないときに折り返す文。labelWithString の部品は 1 行用で、折り返し幅を決めても折り返さない
+fn wrapping_label(text: &str, mtm: MainThreadMarker) -> Retained<NSTextField> {
+    let label = NSTextField::wrappingLabelWithString(&NSString::from_str(text), mtm);
     label.setSelectable(true);
     label
 }

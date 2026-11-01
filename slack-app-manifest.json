@@ -1,0 +1,28 @@
+{
+  "display_information": {
+    "name": "atme",
+    "description": "Never miss Slack mentions and DMs addressed to you",
+    "background_color": "#2a2a2d"
+  },
+  "oauth_config": {
+    "scopes": {
+      "user": [
+        "search:read",
+        "users:read",
+        "channels:read",
+        "groups:read",
+        "im:read",
+        "mpim:read",
+        "channels:history",
+        "groups:history",
+        "im:history",
+        "mpim:history"
+      ]
+    }
+  },
+  "settings": {
+    "org_deploy_enabled": false,
+    "socket_mode_enabled": false,
+    "token_rotation_enabled": false
+  }
+}

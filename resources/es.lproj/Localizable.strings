@@ -189,23 +189,11 @@
 /* ウインドウ：token を確かめて足すボタン */
 "Add" = "Añadir";
 
-/* ウインドウ：token の入力欄の見出し（Slack の画面の表記に合わせて訳さない） */
-"User OAuth Token" = "User OAuth Token";
-
 /* ウインドウ：token を確かめているとき */
 "Checking…" = "Comprobando…";
 
 /* ウインドウ：追加できたとき。%@ はワークスペース名 */
 "Added %@" = "Se ha añadido %@";
-
-/* ウインドウ：ワークスペースが 1 つも無いとき */
-"No workspaces yet. Paste a token to add one." = "Aún no hay espacios de trabajo. Pega un token para añadir uno.";
-
-/* ウインドウ：追加済みのワークスペースの一覧の見出し */
-"Added Workspaces" = "Espacios de trabajo añadidos";
-
-/* ウインドウ：token を入れて足す欄の見出し */
-"Add a Workspace" = "Añadir un espacio de trabajo";
 
 /* メニュー：ワークスペースが 1 つも無いとき。「ワークスペース…」はメニューの項目名に合わせる */
 "No workspaces. Add one from Workspaces…" = "No hay espacios de trabajo. Añade uno desde “Espacios de trabajo…”";
@@ -221,3 +209,18 @@
 
 /* 削除の確認：何もしないボタン */
 "Cancel" = "Cancelar";
+
+/* ウインドウ：manifest を入れて Slack App を作る画面をブラウザで開くボタン */
+"Create Slack App…" = "Crear Slack App…";
+
+/* ウインドウ：追加済みのワークスペースが 1 つも無いとき */
+"No workspaces" = "No hay espacios de trabajo";
+
+/* ウインドウ：手順 1。右に「Slack App を作る…」のボタンが並ぶ */
+"1. Create a Slack App for each workspace" = "1. Crea una Slack App para cada espacio de trabajo";
+
+/* ウインドウ：手順 2（Install to Workspace と User OAuth Token は Slack の画面の表記のまま） */
+"2. On Slack, click Install to Workspace and copy the User OAuth Token" = "2. En Slack, haz clic en Install to Workspace y copia el User OAuth Token";
+
+/* ウインドウ：手順 3。下に token の入力欄と「追加」が並ぶ */
+"3. Paste the copied token and add it" = "3. Pega el token copiado y añádelo";

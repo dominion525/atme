@@ -9,6 +9,7 @@ mod fetch;
 mod l10n;
 mod list;
 mod login;
+mod manifest;
 mod menu;
 mod notify;
 mod read;

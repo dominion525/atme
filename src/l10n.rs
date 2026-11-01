@@ -76,17 +76,18 @@ pub const WORKSPACES: &str = "Workspaces…";
 pub const WORKSPACES_TITLE: &str = "Workspaces";
 pub const REMOVE: &str = "Remove";
 pub const ADD: &str = "Add";
-pub const TOKEN_LABEL: &str = "User OAuth Token";
 pub const CHECKING: &str = "Checking…";
 pub const ADDED: &str = "Added %@";
-pub const NO_WORKSPACES_YET: &str = "No workspaces yet. Paste a token to add one.";
-pub const ADDED_WORKSPACES: &str = "Added Workspaces";
-pub const ADD_WORKSPACE: &str = "Add a Workspace";
 pub const NO_WORKSPACES_MENU: &str = "No workspaces. Add one from Workspaces…";
 pub const WORKSPACE_NOT_TABLES: &str = "workspace must be written as [[workspace]]";
 pub const REMOVE_CONFIRM: &str = "Remove %@?";
 pub const REMOVE_CONFIRM_DETAIL: &str = "The token is also deleted from the Keychain. You can add the workspace again by pasting the same token.";
 pub const CANCEL: &str = "Cancel";
+pub const NO_WORKSPACES: &str = "No workspaces";
+pub const STEP_CREATE: &str = "1. Create a Slack App for each workspace";
+pub const STEP_INSTALL: &str = "2. On Slack, click Install to Workspace and copy the User OAuth Token";
+pub const STEP_PASTE: &str = "3. Paste the copied token and add it";
+pub const CREATE_SLACK_APP: &str = "Create Slack App…";
 
 /// コードで使うキーの一覧。すべて ja.lproj に訳があることをテストで確かめる
 #[cfg_attr(not(test), allow(dead_code))]
@@ -154,17 +155,18 @@ pub const KEYS: &[&str] = &[
     WORKSPACES_TITLE,
     REMOVE,
     ADD,
-    TOKEN_LABEL,
     CHECKING,
     ADDED,
-    NO_WORKSPACES_YET,
-    ADDED_WORKSPACES,
-    ADD_WORKSPACE,
     NO_WORKSPACES_MENU,
     WORKSPACE_NOT_TABLES,
     REMOVE_CONFIRM,
     REMOVE_CONFIRM_DETAIL,
     CANCEL,
+    NO_WORKSPACES,
+    STEP_CREATE,
+    STEP_INSTALL,
+    STEP_PASTE,
+    CREATE_SLACK_APP,
 ];
 
 /// key の訳を、macOS が選んだ言語で引く
