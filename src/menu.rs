@@ -114,13 +114,13 @@ where
                         .filter(|item| item.workspace == *workspace)
                         .map(|item| {
                             let sender = match display::sender(item) {
-                                Some(name) => format!("  {name}"),
+                                Some(name) => format!("  {}", display::short_name(name)),
                                 None => String::new(),
                             };
                             Entry::Message {
                                 label: format!(
                                     "{}{sender}: {}",
-                                    display::channel_label(item),
+                                    display::menu_channel_label(item),
                                     display::summary(&item.text, names, MESSAGE_CHARS)
                                 ),
                                 permalink: item.permalink.clone(),

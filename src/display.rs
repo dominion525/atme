@@ -6,6 +6,9 @@ use chrono::TimeZone;
 use crate::l10n;
 use crate::state::Item;
 
+/// メニューの行に出す名前の長さの上限（文字の数）
+const NAME_CHARS: usize = 12;
+
 /// Slack 上のワークスペース名。まだ取得できていなければ設定の name を使う
 pub fn workspace_name<'a>(teams: &'a BTreeMap<String, String>, workspace: &'a str) -> &'a str {
     teams.get(workspace).map_or(workspace, String::as_str)
@@ -17,6 +20,17 @@ pub fn location(item: &Item, teams: &BTreeMap<String, String>) -> String {
         workspace_name(teams, &item.workspace),
         channel_label(item)
     )
+}
+
+/// メニューの行に出す名前。Slack の表示名には所属や状況まで入れる人がいるので、先頭の NAME_CHARS 文字で切る
+pub fn short_name(name: &str) -> String {
+    if name.chars().count() > NAME_CHARS {
+        // 切った末尾に空白が残ると「開発部 …」のようになるので、空白を落としてから付ける
+        let head: String = name.chars().take(NAME_CHARS).collect();
+        format!("{}…", head.trim_end())
+    } else {
+        name.to_owned()
+    }
 }
 
 /// 表示する送り主。1 対 1 の DM で、送り主が場所に出る相手と同じなら、重なるので出さない
@@ -35,10 +49,19 @@ where
 }
 
 pub fn channel_label(item: &Item) -> String {
+    channel_label_with(item, |name| name.to_owned())
+}
+
+/// メニューの行に出す場所。DM の相手の名前は short_name で切る
+pub fn menu_channel_label(item: &Item) -> String {
+    channel_label_with(item, short_name)
+}
+
+fn channel_label_with(item: &Item, name: impl Fn(&str) -> String) -> String {
     if item.is_im {
         format!(
             "DM {}",
-            item.peer_name.as_deref().unwrap_or(&item.channel_name)
+            name(item.peer_name.as_deref().unwrap_or(&item.channel_name))
         )
     } else if item.is_mpim {
         l10n::text(l10n::GROUP_DM)
@@ -184,6 +207,23 @@ pub mod tests {
 
         assert_eq!(workspace_name(&teams, "home"), "Home 株式会社");
         assert_eq!(workspace_name(&teams, "work"), "work");
+    }
+
+    #[test]
+    fn shortens_long_names_for_the_menu() {
+        assert_eq!(short_name("佐藤"), "佐藤");
+        assert_eq!(short_name("123456789012"), "123456789012");
+        assert_eq!(
+            short_name("佐藤 太郎 / 開発部 / 在宅勤務中"),
+            "佐藤 太郎 / 開発部…"
+        );
+
+        let mut dm = item("D1", "1793181600.000100");
+        dm.is_im = true;
+        dm.peer_name = Some("佐藤 太郎 / 開発部 / 在宅勤務中".into());
+        // メニューでは切り、通知の題などに使う場所の名前は切らない
+        assert_eq!(menu_channel_label(&dm), "DM 佐藤 太郎 / 開発部…");
+        assert_eq!(channel_label(&dm), "DM 佐藤 太郎 / 開発部 / 在宅勤務中");
     }
 
     #[test]
