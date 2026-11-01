@@ -30,10 +30,12 @@ pub const NO_WORKSPACE: &str = "No [[workspace]] is configured";
 pub const DUPLICATE_WORKSPACE: &str = "Workspace name %@ is duplicated";
 pub const HOME_NOT_SET: &str = "HOME is not set";
 pub const SECURITY_FAILED: &str = "Couldn't run the security command";
-pub const KEYCHAIN_READ_FAILED: &str = "Couldn't read service=%1$@ account=%2$@ from the Keychain: %3$@";
+pub const KEYCHAIN_READ_FAILED: &str =
+    "Couldn't read service=%1$@ account=%2$@ from the Keychain: %3$@";
 pub const KEYCHAIN_NOT_UTF8: &str = "The value of account=%@ in the Keychain isn't UTF-8";
 pub const CHANNEL_READ_STATE_FAILED: &str = "Couldn't read the read state of %1$@: %2$@";
-pub const THREAD_READ_STATE_FAILED: &str = "Couldn't read the read state of thread %2$@ in %1$@: %3$@";
+pub const THREAD_READ_STATE_FAILED: &str =
+    "Couldn't read the read state of thread %2$@ in %1$@: %3$@";
 pub const HTTP_CLIENT_FAILED: &str = "Couldn't create the HTTP client";
 pub const NO_THREAD_PARENT: &str = "conversations.replies didn't return the thread parent";
 pub const CALL_FAILED: &str = "Couldn't call %@";
@@ -50,13 +52,18 @@ pub const REPLACE_FAILED: &str = "Couldn't replace %@";
 pub const SOME_WORKSPACES_FAILED: &str = "Some workspaces failed to fetch";
 pub const DISPLAY_NAME_FAILED: &str = "%1$@: couldn't look up the display name of %2$@: %3$@";
 pub const SPARKLE_LOAD_FAILED: &str = "Couldn't load Sparkle.framework";
-pub const OUTSIDE_APP_RESIDENT: &str = "Can't stay in the menu bar because atme was run outside atme.app";
+pub const OUTSIDE_APP_RESIDENT: &str =
+    "Can't stay in the menu bar because atme was run outside atme.app";
 pub const NOT_MAIN_THREAD: &str = "Not running on the main thread";
 pub const NOTIFICATION_REQUEST_FAILED: &str = "Couldn't ask for notification permission: %@";
-pub const NOTIFICATIONS_NOT_ALLOWED_SETTINGS: &str = "Notifications aren't allowed. Allow atme under Notifications in System Settings";
-pub const OUTSIDE_APP_NOTIFY: &str = "Not sending notifications because atme was run outside atme.app";
-pub const NOTIFICATIONS_NOT_ALLOWED_OPEN: &str = "Notifications aren't allowed. Open atme.app to allow them";
-pub const NOTIFICATION_SETTINGS_UNREADABLE: &str = "Not sending notifications because the notification settings couldn't be read";
+pub const NOTIFICATIONS_NOT_ALLOWED_SETTINGS: &str =
+    "Notifications aren't allowed. Allow atme under Notifications in System Settings";
+pub const OUTSIDE_APP_NOTIFY: &str =
+    "Not sending notifications because atme was run outside atme.app";
+pub const NOTIFICATIONS_NOT_ALLOWED_OPEN: &str =
+    "Notifications aren't allowed. Open atme.app to allow them";
+pub const NOTIFICATION_SETTINGS_UNREADABLE: &str =
+    "Not sending notifications because the notification settings couldn't be read";
 pub const NOTIFY_FAILED: &str = "Couldn't send a notification: %@";
 pub const NOTIFICATION_NO_RESPONSE: &str = "No response to the notification request";
 pub const NO_CACHE_RUN_FETCH: &str = "No cache. Run atme fetch";
@@ -165,25 +172,61 @@ fn fill(template: &str, args: &[&str]) -> String {
 mod tests {
     use super::*;
 
-    /// リポジトリの ja.lproj を、1 つのバンドルとして開く
+    /// リポジトリの lang.lproj を、1 つのバンドルとして開く
+    fn translation(lang: &str) -> objc2::rc::Retained<NSBundle> {
+        let path = format!("{}/resources/{lang}.lproj", env!("CARGO_MANIFEST_DIR"));
+        NSBundle::bundleWithPath(&NSString::from_str(&path))
+            .unwrap_or_else(|| panic!("{lang}.lproj を開けません"))
+    }
+
     fn japanese() -> objc2::rc::Retained<NSBundle> {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/resources/ja.lproj");
-        NSBundle::bundleWithPath(&NSString::from_str(path)).expect("ja.lproj を開けません")
+        translation("ja")
     }
 
-    #[test]
-    fn every_key_has_japanese() {
-        let bundle = japanese();
-        let missing: Vec<&str> = KEYS
-            .iter()
-            .copied()
-            .filter(|key| lookup(&bundle, key, None).is_none())
+    /// resources にある訳の言語（lproj の名前）
+    fn languages() -> Vec<String> {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/resources");
+        let mut languages: Vec<String> = std::fs::read_dir(dir)
+            .expect("resources を読めません")
+            .filter_map(|entry| {
+                let name = entry.ok()?.file_name().into_string().ok()?;
+                name.strip_suffix(".lproj").map(str::to_owned)
+            })
             .collect();
-        assert_eq!(missing, Vec::<&str>::new());
+        languages.sort();
+        languages
+    }
+
+    /// すべての言語で、filter に当たったキーを「言語: キー」で集める
+    fn find(filter: impl Fn(&NSBundle, &str) -> bool) -> Vec<String> {
+        languages()
+            .iter()
+            .flat_map(|lang| {
+                let bundle = translation(lang);
+                KEYS.iter()
+                    .filter(|key| filter(&bundle, key))
+                    .map(|key| format!("{lang}: {key}"))
+                    .collect::<Vec<_>>()
+            })
+            .collect()
     }
 
     #[test]
-    fn japanese_keeps_placeholders() {
+    fn has_every_slack_language() {
+        assert_eq!(
+            languages(),
+            ["de", "es", "fr", "it", "ja", "ko", "pt-BR", "zh-Hans", "zh-Hant"]
+        );
+    }
+
+    #[test]
+    fn every_key_is_translated() {
+        let missing = find(|bundle, key| lookup(bundle, key, None).is_none());
+        assert_eq!(missing, Vec::<String>::new());
+    }
+
+    #[test]
+    fn translations_keep_placeholders() {
         fn placeholders(text: &str) -> Vec<String> {
             let mut found: Vec<String> = text
                 .match_indices('%')
@@ -196,15 +239,10 @@ mod tests {
             found.sort();
             found
         }
-        let bundle = japanese();
-        let differ: Vec<&str> = KEYS
-            .iter()
-            .copied()
-            .filter(|key| {
-                lookup(&bundle, key, None).is_some_and(|ja| placeholders(&ja) != placeholders(key))
-            })
-            .collect();
-        assert_eq!(differ, Vec::<&str>::new());
+        let differ = find(|bundle, key| {
+            lookup(bundle, key, None).is_some_and(|text| placeholders(&text) != placeholders(key))
+        });
+        assert_eq!(differ, Vec::<String>::new());
     }
 
     #[test]

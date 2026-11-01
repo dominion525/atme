@@ -1,0 +1,169 @@
+/* キーは英語の文言そのもの（src/l10n.rs）。訳が無いときは英語のまま出る */
+
+/* メニュー：アプリを終了する */
+"Quit" = "Beenden";
+
+/* メニュー：Sparkle で新しい版を確かめる */
+"Check for Updates…" = "Nach Updates suchen …";
+
+/* メニュー：キャッシュのファイルが無いとき */
+"No cache" = "Kein Cache";
+
+/* メニュー：ワークスペースが 1 つも分からず、表示するものも無いとき */
+"No mentions or DMs" = "Keine Erwähnungen oder Direktnachrichten";
+
+/* メニュー：1 度も取得に成功していないとき */
+"Not fetched yet" = "Noch nicht abgerufen";
+
+/* メニュー：最後に取得できた時刻。%@ は「10/28 19:05」の形 */
+"Fetched %@" = "Abgerufen: %@";
+
+/* メニュー：取得全体の失敗。%@ はエラーの内容 */
+"Fetch failed: %@" = "Abruf fehlgeschlagen: %@";
+
+/* メニュー：ワークスペースごとの取得の失敗。%1$@ はワークスペース名、%2$@ はエラーの内容 */
+"Fetch failed: %1$@ (%2$@)" = "Abruf fehlgeschlagen: %1$@ (%2$@)";
+
+/* メニュー：ログイン時の起動の切り替えの失敗。%@ は macOS のエラーの説明 */
+"Couldn't change Open at Login (%@)" = "„Bei der Anmeldung öffnen“ konnte nicht geändert werden (%@)";
+
+/* メニュー：ワークスペースに未読が無いとき */
+"None" = "Keine";
+
+/* メニュー：一覧をすべて既読として外す */
+"Mark All as Read" = "Alle als gelesen markieren";
+
+/* メニュー：すぐに取得する */
+"Fetch Now" = "Jetzt abrufen";
+
+/* メニュー：前回の取得から間が無く、まだ押せないとき。%@ は残りの秒数 */
+"Fetch Now (in %@s)" = "Jetzt abrufen (in %@ s)";
+
+/* メニュー：取得の順番を待っているとき */
+"Waiting to Fetch" = "Warten auf Abruf";
+
+/* メニュー：取得しているとき */
+"Fetching…" = "Abrufen …";
+
+/* メニュー：ログイン時に atme を起動する */
+"Open at Login" = "Bei der Anmeldung öffnen";
+
+/* メニュー：ログイン時の起動に、システム設定での承認が要るとき */
+"Open at Login (needs approval in System Settings)" = "Bei der Anmeldung öffnen (Genehmigung in den Systemeinstellungen erforderlich)";
+
+/* 通知：個別に出さなかった残りの件数。%@ は件数 */
+"And %@ more" = "Und %@ weitere";
+
+/* メニューと通知：グループ DM の場所の名前 */
+"Group DM" = "Gruppen-Direktnachricht";
+
+/* メニューと通知：本文が空のメッセージ */
+"(no text)" = "(kein Text)";
+
+/* ファイルを読めなかった。%@ はファイルのパス */
+"Couldn't read %@" = "%@ konnte nicht gelesen werden";
+
+/* 設定や状態のファイルの中身が読み取れない。%@ はファイルのパス */
+"The contents of %@ are invalid" = "Der Inhalt von %@ ist ungültig";
+
+/* 設定ファイルにワークスペースが無い */
+"No [[workspace]] is configured" = "Kein [[workspace]] konfiguriert";
+
+/* 設定ファイルで同じ name が 2 回ある。%@ は name */
+"Workspace name %@ is duplicated" = "Der Workspace-Name %@ ist doppelt vorhanden";
+
+/* 環境変数 HOME が無い */
+"HOME is not set" = "HOME ist nicht gesetzt";
+
+/* Keychain を読む security コマンドを動かせない */
+"Couldn't run the security command" = "Der Befehl security konnte nicht ausgeführt werden";
+
+/* Keychain に token が無いなど。%3$@ は security コマンドの出力 */
+"Couldn't read service=%1$@ account=%2$@ from the Keychain: %3$@" = "service=%1$@ account=%2$@ konnte nicht aus dem Schlüsselbund gelesen werden: %3$@";
+
+/* Keychain の値が文字列として読めない */
+"The value of account=%@ in the Keychain isn't UTF-8" = "Der Wert von account=%@ im Schlüsselbund ist kein UTF-8";
+
+/* ログ：チャンネルの既読の取得に失敗。%1$@ はチャンネル ID */
+"Couldn't read the read state of %1$@: %2$@" = "Lesestatus von %1$@ konnte nicht gelesen werden: %2$@";
+
+/* ログ：スレッドの既読の取得に失敗。%1$@ はチャンネル ID、%2$@ はスレッドの ts */
+"Couldn't read the read state of thread %2$@ in %1$@: %3$@" = "Lesestatus des Threads %2$@ in %1$@ konnte nicht gelesen werden: %3$@";
+
+/* HTTP の準備に失敗 */
+"Couldn't create the HTTP client" = "HTTP-Client konnte nicht erstellt werden";
+
+/* Slack の応答にスレッドの親が無い */
+"conversations.replies didn't return the thread parent" = "conversations.replies hat die übergeordnete Nachricht des Threads nicht zurückgegeben";
+
+/* Slack の API に接続できない。%@ は API の名前 */
+"Couldn't call %@" = "%@ konnte nicht aufgerufen werden";
+
+/* Slack の API が HTTP のエラーを返した */
+"%1$@ returned HTTP %2$@" = "%1$@ hat HTTP %2$@ zurückgegeben";
+
+/* Slack の応答を受け取れない */
+"Couldn't read the response of %@" = "Die Antwort von %@ konnte nicht gelesen werden";
+
+/* Slack の応答の形が想定と違う */
+"Couldn't parse the response of %@" = "Die Antwort von %@ konnte nicht verarbeitet werden";
+
+/* Slack の API がエラーを返した。%2$@ は Slack のエラーコード（訳さない） */
+"%1$@ failed: %2$@" = "%1$@ fehlgeschlagen: %2$@";
+
+/* 状態のファイルの保存先が無い */
+"No directory to save to" = "Kein Verzeichnis zum Speichern";
+
+/* ディレクトリを作れない */
+"Couldn't create %@" = "%@ konnte nicht erstellt werden";
+
+/* ファイルの権限を変えられない */
+"Couldn't set the permissions of %@" = "Die Zugriffsrechte von %@ konnten nicht gesetzt werden";
+
+/* ファイルを開けない */
+"Couldn't open %@" = "%@ konnte nicht geöffnet werden";
+
+/* ファイルに書けない */
+"Couldn't write to %@" = "In %@ konnte nicht geschrieben werden";
+
+/* 書いたファイルで置き換えられない */
+"Couldn't replace %@" = "%@ konnte nicht ersetzt werden";
+
+/* CLI：atme fetch で失敗があった */
+"Some workspaces failed to fetch" = "Bei einigen Workspaces ist der Abruf fehlgeschlagen";
+
+/* ログ：users.info の失敗。%1$@ はワークスペース、%2$@ はユーザー ID */
+"%1$@: couldn't look up the display name of %2$@: %3$@" = "%1$@: Anzeigename von %2$@ konnte nicht ermittelt werden: %3$@";
+
+/* ログ：自動アップデートの準備に失敗 */
+"Couldn't load Sparkle.framework" = "Sparkle.framework konnte nicht geladen werden";
+
+/* .app の外から引数なしで起動した */
+"Can't stay in the menu bar because atme was run outside atme.app" = "atme kann nicht in der Menüleiste bleiben, da es außerhalb von atme.app gestartet wurde";
+
+/* 内部のエラー */
+"Not running on the main thread" = "Läuft nicht im Hauptthread";
+
+/* ログ：通知の許可の問い合わせに失敗 */
+"Couldn't ask for notification permission: %@" = "Mitteilungsberechtigung konnte nicht angefragt werden: %@";
+
+/* ログ：起動時に通知が許可されなかった */
+"Notifications aren't allowed. Allow atme under Notifications in System Settings" = "Mitteilungen sind nicht erlaubt. Erlaube atme unter „Mitteilungen“ in den Systemeinstellungen";
+
+/* ログ：.app の外の CLI では通知しない */
+"Not sending notifications because atme was run outside atme.app" = "Es werden keine Mitteilungen gesendet, da atme außerhalb von atme.app gestartet wurde";
+
+/* ログ：通知が許可されていない */
+"Notifications aren't allowed. Open atme.app to allow them" = "Mitteilungen sind nicht erlaubt. Öffne atme.app, um sie zu erlauben";
+
+/* ログ：通知の設定を読めない */
+"Not sending notifications because the notification settings couldn't be read" = "Es werden keine Mitteilungen gesendet, da die Mitteilungseinstellungen nicht gelesen werden konnten";
+
+/* ログ：通知の登録に失敗 */
+"Couldn't send a notification: %@" = "Mitteilung konnte nicht gesendet werden: %@";
+
+/* ログ：通知の登録が返ってこない */
+"No response to the notification request" = "Keine Antwort auf die Mitteilungsanfrage";
+
+/* CLI：atme list でキャッシュが無い */
+"No cache. Run atme fetch" = "Kein Cache. Führe atme fetch aus";
