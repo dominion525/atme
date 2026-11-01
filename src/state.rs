@@ -31,6 +31,9 @@ pub struct Cache {
     /// 設定の name から、Slack 上のワークスペース名への対応
     #[serde(default)]
     pub teams: BTreeMap<String, String>,
+    /// 設定の name から、Slack のワークスペースの ID（team_id）への対応。追加のときに同じワークスペースを見分けるのに使う
+    #[serde(default)]
+    pub team_ids: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

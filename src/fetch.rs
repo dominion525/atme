@@ -9,7 +9,7 @@ use crate::display;
 use crate::l10n;
 use crate::notify;
 use crate::read;
-use crate::slack::{Client, Message};
+use crate::slack::{AuthTest, Client, Message};
 use crate::state::{ts_seconds, Cache, Item, Seen, Store};
 
 const SECONDS_PER_DAY: i64 = 86_400;
@@ -66,6 +66,7 @@ pub fn fetch_once() -> Result<Vec<Report>> {
     let mut items = Vec::new();
     let mut errors = Vec::new();
     let mut teams = previous_cache.teams.clone();
+    let mut team_ids = previous_cache.team_ids.clone();
     for workspace in &config.workspace {
         let names = users.entry(workspace.name.clone()).or_default();
         let previous: Vec<Item> = previous_cache
@@ -75,9 +76,12 @@ pub fn fetch_once() -> Result<Vec<Report>> {
             .cloned()
             .collect();
         match fetch_workspace(workspace, &after, names, previous) {
-            Ok((team, workspace_items)) => {
+            Ok((auth, workspace_items)) => {
                 errors.push(None);
-                teams.insert(workspace.name.clone(), team);
+                teams.insert(workspace.name.clone(), auth.team);
+                if !auth.team_id.is_empty() {
+                    team_ids.insert(workspace.name.clone(), auth.team_id);
+                }
                 items.extend(workspace_items);
             }
             Err(error) => {
@@ -95,6 +99,7 @@ pub fn fetch_once() -> Result<Vec<Report>> {
     // 外したワークスペースの名前の対応と表示名は残さない
     let names: Vec<&str> = config.workspace.iter().map(|workspace| workspace.name.as_str()).collect();
     keep_workspaces(&mut teams, &names);
+    keep_workspaces(&mut team_ids, &names);
     keep_workspaces(&mut users, &names);
     items.sort_by_key(|item| std::cmp::Reverse((ts_seconds(&item.ts), item.ts.clone())));
 
@@ -132,6 +137,7 @@ pub fn fetch_once() -> Result<Vec<Report>> {
         ),
         items,
         teams,
+        team_ids,
     })?;
     store.save_users(&users)?;
     Ok(reports)
@@ -142,10 +148,10 @@ fn fetch_workspace(
     after: &str,
     names: &mut BTreeMap<String, String>,
     previous: Vec<Item>,
-) -> Result<(String, Vec<Item>)> {
+) -> Result<(AuthTest, Vec<Item>)> {
     let client = Client::new(Token::load(workspace)?)?;
     let auth = client.auth_test()?;
-    let me = auth.user_id;
+    let me = auth.user_id.clone();
     let mut messages = client.search_messages(&format!("<@{me}> after:{after}"))?;
     messages.extend(client.search_messages(&format!("to:me after:{after}"))?);
     let messages = select(messages, &me);
@@ -174,7 +180,7 @@ fn fetch_workspace(
         .map(|message| to_item(&workspace.name, message, names))
         .collect();
     Ok((
-        auth.team,
+        auth,
         read::unread_only(merge(fresh, previous), &client),
     ))
 }

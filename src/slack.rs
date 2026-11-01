@@ -43,6 +43,9 @@ pub struct Client {
 pub struct AuthTest {
     pub user_id: String,
     pub team: String,
+    /// ワークスペースの ID（T で始まる）。URL や名前が変わっても変わらない
+    #[serde(default)]
+    pub team_id: String,
     /// ワークスペースの URL（https://xxx.slack.com/）
     #[serde(default)]
     pub url: String,

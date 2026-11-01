@@ -119,6 +119,7 @@ pub mod tests {
             fetched_at: 1793181900,
             items: vec![dm, bot],
             teams: BTreeMap::from([("home".to_owned(), "Home 株式会社".to_owned())]),
+            team_ids: BTreeMap::from([("home".to_owned(), "T1".to_owned())]),
         }
     }
 
