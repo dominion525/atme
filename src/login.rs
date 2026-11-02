@@ -49,19 +49,11 @@ mod tests {
         );
     }
 
-    /// 登録と解除の結果の状態（macOS が受け付けたとき）
-    fn after(action: Action) -> Option<LoginState> {
-        match action {
-            Action::Register => Some(LoginState::On),
-            Action::Unregister => Some(LoginState::Off),
-            Action::OpenSettings => None,
-        }
-    }
-
     #[test]
     fn choosing_the_item_turns_launch_at_login_the_other_way() {
-        assert_eq!(after(action(LoginState::Off)), Some(LoginState::On));
-        assert_eq!(after(action(LoginState::On)), Some(LoginState::Off));
+        // オフのときに選ぶと登録してオンに、オンのときに選ぶと解除してオフにする
+        assert_eq!(action(LoginState::Off), Action::Register);
+        assert_eq!(action(LoginState::On), Action::Unregister);
     }
 
     #[test]

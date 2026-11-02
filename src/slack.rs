@@ -437,14 +437,8 @@ mod tests {
 
     #[test]
     fn unreachable_server_is_reported() {
-        // 空いているポートを 1 つ借りてすぐ返し、何も待ち受けていないそのポートに向ける
-        let port = std::net::TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
-        let client =
-            Client::with_base(Token::new(TOKEN.into()), format!("http://127.0.0.1:{port}")).unwrap();
+        // ポート 0 にはだれも待ち受けられないので、つながらないことが決まっている（ほかのテストとポートを取り合わない）
+        let client = Client::with_base(Token::new(TOKEN.into()), "http://127.0.0.1:0").unwrap();
 
         let error = client.auth_test().unwrap_err();
 
