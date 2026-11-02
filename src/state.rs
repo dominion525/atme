@@ -165,28 +165,51 @@ fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
 mod tests {
     use super::*;
 
-    fn temp_store(name: &str) -> Store {
-        let dir = std::env::temp_dir().join(format!("atme-test-{}-{name}", std::process::id()));
-        Store::new(dir)
+    /// 一時的なフォルダの中の、まだ無い状態のフォルダを使う Store。フォルダはテストが終わると消える
+    fn temp_store() -> (tempfile::TempDir, Store) {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path().join("state"));
+        (dir, store)
+    }
+
+    fn key(ts: &str) -> SeenKey {
+        SeenKey {
+            workspace: "home".into(),
+            channel: "C1".into(),
+            ts: ts.into(),
+        }
+    }
+
+    fn item() -> Item {
+        Item {
+            workspace: "home".into(),
+            channel_id: "C1".into(),
+            channel_name: "general".into(),
+            is_im: false,
+            is_mpim: false,
+            peer_name: None,
+            user: Some("U1".into()),
+            user_name: Some("佐藤".into()),
+            ts: "1793176152.520719".into(),
+            text: "本文".into(),
+            permalink: "https://example.slack.com/archives/C1/p1793176152520719".into(),
+            thread_ts: Some("1793176000.000100".into()),
+        }
     }
 
     #[test]
     fn missing_files_are_none() {
-        let store = temp_store("missing");
+        let (_dir, store) = temp_store();
         assert!(store.load_seen().unwrap().is_none());
         assert!(store.load_cache().unwrap().is_none());
         assert!(store.load_users().unwrap().is_none());
+        assert!(store.load_dismissed().unwrap().is_none());
     }
 
     #[test]
     fn round_trips_seen() {
-        let store = temp_store("seen");
-        let seen: Seen = [SeenKey {
-            workspace: "home".into(),
-            channel: "C1".into(),
-            ts: "1793176152.520719".into(),
-        }]
-        .into();
+        let (_dir, store) = temp_store();
+        let seen: Seen = [key("1793176152.520719")].into();
 
         store.save_seen(&seen).unwrap();
 
@@ -195,8 +218,76 @@ mod tests {
     }
 
     #[test]
+    fn round_trips_cache() {
+        let (_dir, store) = temp_store();
+        let cache = Cache {
+            fetched_at: 1793181900,
+            items: vec![item()],
+            teams: BTreeMap::from([("home".to_owned(), "Home".to_owned())]),
+            team_ids: BTreeMap::from([("home".to_owned(), "T1".to_owned())]),
+        };
+
+        store.save_cache(&cache).unwrap();
+        let loaded = store.load_cache().unwrap().unwrap();
+
+        assert_eq!(loaded.fetched_at, cache.fetched_at);
+        assert_eq!(loaded.items, cache.items);
+        assert_eq!(loaded.teams, cache.teams);
+        assert_eq!(loaded.team_ids, cache.team_ids);
+    }
+
+    #[test]
+    fn reads_a_cache_written_by_an_older_version() {
+        // teams・team_ids・thread_ts が無かった頃のキャッシュも読める
+        let (_dir, store) = temp_store();
+        fs::create_dir_all(&store.dir).unwrap();
+        fs::write(
+            store.dir.join("cache.json"),
+            r#"{"fetched_at":1,"items":[{"workspace":"home","channel_id":"C1","channel_name":"general","is_im":false,"is_mpim":false,"peer_name":null,"user":null,"user_name":null,"ts":"1.000100","text":"","permalink":"https://example.slack.com/"}]}"#,
+        )
+        .unwrap();
+
+        let cache = store.load_cache().unwrap().unwrap();
+
+        assert!(cache.teams.is_empty());
+        assert!(cache.team_ids.is_empty());
+        assert_eq!(cache.items[0].thread_ts, None);
+    }
+
+    #[test]
+    fn round_trips_users_and_dismissed() {
+        let (_dir, store) = temp_store();
+        let users: Users = BTreeMap::from([(
+            "home".to_owned(),
+            BTreeMap::from([("U1".to_owned(), "佐藤".to_owned())]),
+        )]);
+        let dismissed: Dismissed = [key("1.000100"), key("2.000200")].into();
+
+        store.save_users(&users).unwrap();
+        store.save_dismissed(&dismissed).unwrap();
+
+        assert_eq!(store.load_users().unwrap(), Some(users));
+        assert_eq!(store.load_dismissed().unwrap(), Some(dismissed));
+    }
+
+    #[test]
+    fn broken_file_names_the_path() {
+        let (_dir, store) = temp_store();
+        fs::create_dir_all(&store.dir).unwrap();
+        let path = store.dir.join("cache.json");
+        fs::write(&path, "{ not json").unwrap();
+
+        let error = store.load_cache().unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            format!("The contents of {} are invalid", path.display())
+        );
+    }
+
+    #[test]
     fn files_are_owner_only() {
-        let store = temp_store("permissions");
+        let (_dir, store) = temp_store();
         fs::create_dir_all(&store.dir).unwrap();
         fs::set_permissions(&store.dir, Permissions::from_mode(0o755)).unwrap();
 

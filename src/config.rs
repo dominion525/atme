@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
@@ -29,18 +29,14 @@ fn default_days() -> u32 {
 
 impl Config {
     pub fn load() -> Result<Self> {
-        let path = path()?;
-        // 設定ファイルがまだ無いのは、ワークスペースを 1 つも足していないとき
-        let text = match std::fs::read_to_string(&path) {
-            Ok(text) => text,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
-            Err(error) => {
-                return Err(error).with_context(|| {
-                    l10n::format(l10n::READ_FAILED, &[&path.display().to_string()])
-                });
-            }
-        };
-        Self::parse(&text).with_context(|| l10n::format(l10n::INVALID_CONTENTS, &[&path.display().to_string()]))
+        Self::load_from(&path()?)
+    }
+
+    /// path の設定ファイルを読む
+    pub fn load_from(path: &Path) -> Result<Self> {
+        let text = read_text(path)?;
+        Self::parse(&text)
+            .with_context(|| l10n::format(l10n::INVALID_CONTENTS, &[&path.display().to_string()]))
     }
 
     fn parse(text: &str) -> Result<Self> {
@@ -57,33 +53,45 @@ impl Config {
 
 /// 設定ファイルに name のワークスペースを足す。ファイルが無ければ作る
 pub fn add_workspace(name: &str) -> Result<()> {
-    edit(|text| with_workspace(text, name))
+    add_workspace_at(&path()?, name)
+}
+
+/// path の設定ファイルに name のワークスペースを足す。ファイルが無ければ作る
+pub fn add_workspace_at(path: &Path, name: &str) -> Result<()> {
+    edit(path, |text| with_workspace(text, name))
 }
 
 /// 設定ファイルから name のワークスペースを外す
 pub fn remove_workspace(name: &str) -> Result<()> {
-    edit(|text| without_workspace(text, name))
+    remove_workspace_at(&path()?, name)
+}
+
+/// path の設定ファイルから name のワークスペースを外す
+pub fn remove_workspace_at(path: &Path, name: &str) -> Result<()> {
+    edit(path, |text| without_workspace(text, name))
 }
 
 /// 設定ファイルを読み、change で書き換えて保存する。ユーザーが書いたコメントや並びは残す
-fn edit(change: impl FnOnce(&str) -> Result<String>) -> Result<()> {
-    let path = path()?;
-    let text = match std::fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(error) => {
-            return Err(error)
-                .with_context(|| l10n::format(l10n::READ_FAILED, &[&path.display().to_string()]));
-        }
-    };
+fn edit(path: &Path, change: impl FnOnce(&str) -> Result<String>) -> Result<()> {
+    let text = read_text(path)?;
     let changed = change(&text)
         .with_context(|| l10n::format(l10n::INVALID_CONTENTS, &[&path.display().to_string()]))?;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)
             .with_context(|| l10n::format(l10n::CREATE_FAILED, &[&dir.display().to_string()]))?;
     }
-    std::fs::write(&path, changed)
+    std::fs::write(path, changed)
         .with_context(|| l10n::format(l10n::WRITE_FAILED, &[&path.display().to_string()]))
+}
+
+/// 設定ファイルの中身を読む。まだ無いのは、ワークスペースを 1 つも足していないときなので、空として読む
+fn read_text(path: &Path) -> Result<String> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => Ok(text),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(error) => Err(error)
+            .with_context(|| l10n::format(l10n::READ_FAILED, &[&path.display().to_string()])),
+    }
 }
 
 fn with_workspace(text: &str, name: &str) -> Result<String> {
@@ -222,7 +230,10 @@ mod tests {
     fn refuses_to_add_when_workspace_is_not_tables() {
         let error = with_workspace("workspace = 1\n", "home").unwrap_err();
 
-        assert_eq!(error.to_string(), "workspace must be written as [[workspace]]");
+        assert_eq!(
+            error.to_string(),
+            "workspace must be written as [[workspace]]"
+        );
     }
 
     #[test]
@@ -239,5 +250,111 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(error.to_string(), "Workspace name home is duplicated");
+    }
+
+    /// 一時的なフォルダの中の .config/atme/config.toml（フォルダはまだ無い）
+    fn config_path() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".config/atme/config.toml");
+        (dir, path)
+    }
+
+    #[test]
+    fn missing_file_is_a_config_without_workspaces() {
+        let (_dir, path) = config_path();
+
+        let config = Config::load_from(&path).unwrap();
+
+        assert_eq!(config.days, 7);
+        assert!(config.workspace.is_empty());
+    }
+
+    #[test]
+    fn loads_a_written_file() {
+        let (_dir, path) = config_path();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "days = 3\n\n[[workspace]]\nname = \"home\"\n").unwrap();
+
+        let config = Config::load_from(&path).unwrap();
+
+        assert_eq!(config.days, 3);
+        assert_eq!(config.workspace[0].name, "home");
+    }
+
+    #[test]
+    fn broken_file_names_the_path() {
+        let (_dir, path) = config_path();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "days = ").unwrap();
+
+        let error = Config::load_from(&path).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            format!("The contents of {} are invalid", path.display())
+        );
+    }
+
+    #[test]
+    fn unreadable_path_is_an_error() {
+        // ファイルの代わりにフォルダがあると読めない
+        let (_dir, path) = config_path();
+        std::fs::create_dir_all(&path).unwrap();
+
+        let error = Config::load_from(&path).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            format!("Couldn't read {}", path.display())
+        );
+    }
+
+    #[test]
+    fn adding_creates_the_folder_and_the_file() {
+        let (_dir, path) = config_path();
+
+        add_workspace_at(&path, "home").unwrap();
+        add_workspace_at(&path, "work").unwrap();
+
+        let names: Vec<String> = Config::load_from(&path)
+            .unwrap()
+            .workspace
+            .into_iter()
+            .map(|workspace| workspace.name)
+            .collect();
+        assert_eq!(names, ["home", "work"]);
+    }
+
+    #[test]
+    fn removing_keeps_the_rest_of_the_file() {
+        let (_dir, path) = config_path();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            "# 自分の設定\ndays = 3\n\n[[workspace]]\nname = \"home\"\n\n[[workspace]]\nname = \"work\"\n",
+        )
+        .unwrap();
+
+        remove_workspace_at(&path, "home").unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "# 自分の設定\ndays = 3\n\n[[workspace]]\nname = \"work\"\n"
+        );
+    }
+
+    #[test]
+    fn broken_file_is_left_as_it_is() {
+        let (_dir, path) = config_path();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "workspace = 1\n").unwrap();
+
+        let error = add_workspace_at(&path, "home").unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            format!("The contents of {} are invalid", path.display())
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "workspace = 1\n");
     }
 }
