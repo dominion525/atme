@@ -1,22 +1,5 @@
+use atme::{app, fetch, list};
 use clap::{Parser, Subcommand};
-
-mod app;
-mod config;
-mod credentials;
-mod dismiss;
-mod display;
-mod fetch;
-mod l10n;
-mod list;
-mod login;
-mod manifest;
-mod menu;
-mod notify;
-mod read;
-mod scheduler;
-mod setup;
-mod slack;
-mod state;
 
 #[derive(Parser)]
 #[command(
