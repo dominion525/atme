@@ -549,7 +549,12 @@ mod flow_tests {
         World { world, server }
     }
 
-    fn respond(server: &mut ServerGuard, method: &str, params: &[(&str, &str)], body: &str) {
+    fn respond(
+        server: &mut ServerGuard,
+        method: &str,
+        params: &[(&str, &str)],
+        body: &str,
+    ) -> mockito::Mock {
         let body_matchers = params
             .iter()
             .map(|(key, value)| Matcher::UrlEncoded((*key).into(), (*value).into()))
@@ -559,11 +564,16 @@ mod flow_tests {
             .match_header("authorization", "Bearer xoxp-home")
             .match_body(Matcher::AllOf(body_matchers))
             .with_body(body)
-            .create();
+            .create()
     }
 
-    /// home の Slack：自分は U0ME。#general でのメンション（佐藤さん）と、田中さんからの DM が未読
-    fn slack_for_home(server: &mut ServerGuard, general_last_read: &str) {
+    /// home の Slack：自分は U0ME。#general でのメンション（佐藤さん）と、田中さんからの DM が未読。
+    /// users.info のモックを、ユーザー ID ごとに返す（呼ばれた回数を確かめるため）
+    fn slack_for_home(
+        server: &mut ServerGuard,
+        general_last_read: &str,
+    ) -> BTreeMap<&'static str, mockito::Mock> {
+        let mut users = BTreeMap::new();
         respond(
             server,
             "auth.test",
@@ -591,12 +601,13 @@ mod flow_tests {
             ),
         );
         for (id, name) in [("U0ME", "鈴木"), ("U1", "佐藤"), ("U2", "田中")] {
-            respond(
+            let mock = respond(
                 server,
                 "users.info",
                 &[("user", id)],
                 &format!(r#"{{"ok":true,"user":{{"name":"{id}","profile":{{"display_name":"{name}"}}}}}}"#),
             );
+            users.insert(id, mock);
         }
         respond(
             server,
@@ -610,6 +621,7 @@ mod flow_tests {
             &[("channel", "D1")],
             r#"{"ok":true,"channel":{"last_read":"0.000000"}}"#,
         );
+        users
     }
 
     const HOME: &str = "[[workspace]]\nname = \"home\"\n";
@@ -697,6 +709,28 @@ mod flow_tests {
 
         assert!(world.notified.borrow().is_empty());
         assert_eq!(cached_ts(&world), [DM, MENTION]);
+    }
+
+    #[test]
+    fn known_display_names_are_not_looked_up_again() {
+        // 佐藤さん（U1）の表示名は前回の取得で覚えている
+        let mut world = world(HOME);
+        let users = slack_for_home(&mut world.server, "0.000000");
+        world
+            .env
+            .store
+            .save_users(&BTreeMap::from([(
+                "home".to_owned(),
+                BTreeMap::from([("U1".to_owned(), "佐藤".to_owned())]),
+            )]))
+            .unwrap();
+
+        fetch_with(&world.env).unwrap();
+
+        assert!(!users["U1"].matched());
+        users["U2"].assert();
+        users["U0ME"].assert();
+        assert_eq!(world.env.store.load_users().unwrap().unwrap()["home"]["U2"], "田中");
     }
 
     #[test]
