@@ -990,6 +990,51 @@ mod flow_tests {
     }
 
     #[test]
+    fn failing_in_the_middle_keeps_the_previous_unread_and_name() {
+        // auth.test は通るが、search.messages が HTTP 500 を返す（Slack の障害など）
+        let mut world = world(HOME);
+        respond(
+            &mut world.server,
+            "auth.test",
+            &[],
+            r#"{"ok":true,"user_id":"U0ME","team":"Home","team_id":"T1","url":"https://home.slack.com/"}"#,
+        );
+        world
+            .server
+            .mock("POST", "/search.messages")
+            .with_status(500)
+            .create();
+        let carried = previous_item("home", CARRIED);
+        world.env.store.save_seen(&[carried.key()].into()).unwrap();
+        world
+            .env
+            .store
+            .save_cache(&Cache {
+                fetched_at: 100,
+                items: vec![carried],
+                teams: BTreeMap::from([("home".to_owned(), "Home".to_owned())]),
+                team_ids: BTreeMap::from([("home".to_owned(), "T1".to_owned())]),
+            })
+            .unwrap();
+
+        let reports = fetch_with(&world.env).unwrap();
+
+        assert_eq!(
+            reports,
+            [Report {
+                workspace: "Home".into(),
+                result: Err("search.messages returned HTTP 500 Internal Server Error".into()),
+            }]
+        );
+        assert_eq!(cached_ts(&world), [CARRIED]);
+        let cache = world.env.store.load_cache().unwrap().unwrap();
+        assert_eq!(cache.teams["home"], "Home");
+        assert_eq!(cache.team_ids["home"], "T1");
+        assert_eq!(cache.fetched_at, 100);
+        assert!(world.notified.borrow().is_empty());
+    }
+
+    #[test]
     fn every_workspace_failing_keeps_the_previous_fetched_at() {
         let world = world("[[workspace]]\nname = \"work\"\n");
         world
