@@ -650,6 +650,18 @@ mod flow_tests {
     }
 
     #[test]
+    fn notifications_use_the_slack_name_of_a_workspace_fetched_for_the_first_time() {
+        // home はまだ 1 度も取得していないので、前のキャッシュに Slack 上の名前（Home）は無い
+        let mut world = world(HOME);
+        slack_for_home(&mut world.server, "0.000000");
+        world.env.store.save_seen(&Seen::new()).unwrap();
+
+        fetch_with(&world.env).unwrap();
+
+        assert_eq!(*world.titles.borrow(), ["Home / DM 田中", "Home / #general"]);
+    }
+
+    #[test]
     fn first_fetch_saves_without_notifying() {
         // 初めての取得では、今ある未読をまとめて通知しない
         let mut world = world(HOME);

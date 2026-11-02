@@ -61,6 +61,8 @@ pub mod fake {
         pub tokens: Rc<RefCell<BTreeMap<String, String>>>,
         /// 通知した項目の ts
         pub notified: Rc<RefCell<Vec<String>>>,
+        /// 通知した項目の題（ワークスペース名 / 場所）。通知に渡されたワークスペース名の対応で作る
+        pub titles: Rc<RefCell<Vec<String>>>,
         _dir: tempfile::TempDir,
     }
 
@@ -71,6 +73,8 @@ pub mod fake {
         std::fs::write(&config_path, config).unwrap();
         let tokens = Rc::new(RefCell::new(BTreeMap::<String, String>::new()));
         let notified = Rc::new(RefCell::new(Vec::new()));
+        let titles = Rc::new(RefCell::new(Vec::new()));
+        let record_titles = Rc::clone(&titles);
         let (read, save, delete, record) = (
             Rc::clone(&tokens),
             Rc::clone(&tokens),
@@ -93,10 +97,13 @@ pub mod fake {
                 delete.borrow_mut().remove(name);
                 Ok(())
             }),
-            notify: Box::new(move |items, _users, _teams| {
+            notify: Box::new(move |items, _users, teams| {
                 record
                     .borrow_mut()
-                    .extend(items.iter().map(|item| item.ts.clone()))
+                    .extend(items.iter().map(|item| item.ts.clone()));
+                record_titles
+                    .borrow_mut()
+                    .extend(items.iter().map(|item| crate::display::location(item, teams)));
             }),
             // 2026-11-01 12:00。さかのぼる日付は 7 日前の 2026-10-25
             now: Local.with_ymd_and_hms(2026, 11, 1, 12, 0, 0).unwrap(),
@@ -105,6 +112,7 @@ pub mod fake {
             env,
             tokens,
             notified,
+            titles,
             _dir: dir,
         }
     }
