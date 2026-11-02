@@ -836,16 +836,17 @@ mod flow_tests {
 
     #[test]
     fn a_failing_workspace_keeps_its_previous_items() {
-        // work は token が読めずに失敗する。前回の work の未読は残す
+        // work は token が読めずに失敗する。前回の work の未読（前回の取得で通知済み）は残す
         let mut world = world("[[workspace]]\nname = \"home\"\n\n[[workspace]]\nname = \"work\"\n");
         slack_for_home(&mut world.server, "0.000000");
-        world.env.store.save_seen(&Seen::new()).unwrap();
+        let carried = previous_item("work", "1793400000.000300");
+        world.env.store.save_seen(&[carried.key()].into()).unwrap();
         world
             .env
             .store
             .save_cache(&Cache {
                 fetched_at: 100,
-                items: vec![previous_item("work", "1793400000.000300")],
+                items: vec![carried],
                 teams: BTreeMap::from([("work".to_owned(), "Work".to_owned())]),
                 team_ids: BTreeMap::new(),
             })
@@ -862,6 +863,8 @@ mod flow_tests {
             }
         );
         assert_eq!(cached_ts(&world), [DM, MENTION, "1793400000.000300"]);
+        // 失敗したワークスペースの持ち越しは、もう一度は通知しない
+        assert_eq!(*world.notified.borrow(), [DM, MENTION]);
         let cache = world.env.store.load_cache().unwrap().unwrap();
         assert_eq!(cache.fetched_at, world.env.now.timestamp());
     }
