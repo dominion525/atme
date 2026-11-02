@@ -338,8 +338,10 @@ mod tests {
 
     #[test]
     fn fetched_replaces_the_failure_lines() {
-        let mut state = State::default();
-        state.failures = vec!["old".into()];
+        let mut state = State {
+            failures: vec!["old".into()],
+            ..State::default()
+        };
 
         let effects = state.fetched(vec!["new".into()]);
 
@@ -514,8 +516,10 @@ mod tests {
 
     #[test]
     fn removing_clears_the_status_and_fetches() {
-        let mut state = State::default();
-        state.setup_status = Status::Info("Added Acme".into());
+        let mut state = State {
+            setup_status: Status::Info("Added Acme".into()),
+            ..State::default()
+        };
 
         assert_eq!(
             state.removed(Ok(())),

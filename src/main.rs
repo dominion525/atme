@@ -2,10 +2,7 @@ use atme::{app, fetch, list};
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(
-    version,
-    about = "Never miss Slack mentions and DMs addressed to you"
-)]
+#[command(version, about = "Never miss Slack mentions and DMs addressed to you")]
 struct Cli {
     /// Stays in the menu bar when omitted (what happens when atme.app is opened)
     #[command(subcommand)]

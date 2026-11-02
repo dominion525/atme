@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use chrono::{NaiveDate, TimeDelta};
 
 use crate::config::{Config, Workspace};
@@ -9,7 +9,7 @@ use crate::env::Env;
 use crate::l10n;
 use crate::read;
 use crate::slack::{AuthTest, Client, Message};
-use crate::state::{ts_seconds, Cache, Item, Seen, SeenKey};
+use crate::state::{Cache, Item, Seen, SeenKey, ts_seconds};
 
 const SECONDS_PER_DAY: i64 = 86_400;
 
@@ -101,7 +101,11 @@ pub fn fetch_with(env: &Env) -> Result<Vec<Report>> {
         }
     }
     // 外したワークスペースの名前の対応と表示名は残さない
-    let names: Vec<&str> = config.workspace.iter().map(|workspace| workspace.name.as_str()).collect();
+    let names: Vec<&str> = config
+        .workspace
+        .iter()
+        .map(|workspace| workspace.name.as_str())
+        .collect();
     keep_workspaces(&mut teams, &names);
     keep_workspaces(&mut team_ids, &names);
     keep_workspaces(&mut users, &names);
@@ -131,7 +135,9 @@ pub fn fetch_with(env: &Env) -> Result<Vec<Report>> {
         })
         .collect();
     // 出せなかった通知の未読は、通知済みにしない。次の取得で、もう一度知らせる
-    let delivered: BTreeSet<SeenKey> = (env.notify)(&new_items, &users, &teams).into_iter().collect();
+    let delivered: BTreeSet<SeenKey> = (env.notify)(&new_items, &users, &teams)
+        .into_iter()
+        .collect();
     for item in &new_items {
         let key = item.key();
         if !delivered.contains(&key) {
@@ -191,10 +197,7 @@ fn fetch_workspace(
         .into_iter()
         .map(|message| to_item(&workspace.name, message, names))
         .collect();
-    Ok((
-        auth,
-        read::unread_only(merge(fresh, previous), &client),
-    ))
+    Ok((auth, read::unread_only(merge(fresh, previous), &client)))
 }
 
 /// ワークスペースの名前をキーにした対応から、names に無いものを外す
@@ -204,11 +207,7 @@ fn keep_workspaces<V>(map: &mut BTreeMap<String, V>, names: &[&str]) {
 
 /// キャッシュに残す取得時刻。すべてのワークスペースで失敗したときは、前回の時刻のままにする
 fn fetched_at(previous: i64, now: i64, any_succeeded: bool) -> i64 {
-    if any_succeeded {
-        now
-    } else {
-        previous
-    }
+    if any_succeeded { now } else { previous }
 }
 
 fn after_date(today: NaiveDate, days: u32) -> String {
@@ -358,7 +357,10 @@ mod tests {
 
         keep_workspaces(&mut teams, &["home", "work"]);
 
-        assert_eq!(teams, BTreeMap::from([("home".to_owned(), "Home".to_owned())]));
+        assert_eq!(
+            teams,
+            BTreeMap::from([("home".to_owned(), "Home".to_owned())])
+        );
     }
 
     #[test]
@@ -435,7 +437,12 @@ mod tests {
         assert_eq!(item.thread_ts.as_deref(), Some("100.000001"));
         assert_eq!(item.reply_parent(), Some("100.000001"));
         assert_eq!(
-            to_item("home", message("C1", Some("U3"), "300.000003"), &BTreeMap::new()).thread_ts,
+            to_item(
+                "home",
+                message("C1", Some("U3"), "300.000003"),
+                &BTreeMap::new()
+            )
+            .thread_ts,
             None
         );
     }
@@ -614,7 +621,9 @@ mod flow_tests {
             let body = if missing.contains(&id) {
                 r#"{"ok":false,"error":"user_not_found"}"#.to_owned()
             } else {
-                format!(r#"{{"ok":true,"user":{{"name":"{id}","profile":{{"display_name":"{name}"}}}}}}"#)
+                format!(
+                    r#"{{"ok":true,"user":{{"name":"{id}","profile":{{"display_name":"{name}"}}}}}}"#
+                )
             };
             let mock = respond(server, "users.info", &[("user", id)], &body);
             users.insert(id, mock);
@@ -664,8 +673,14 @@ mod flow_tests {
         assert_eq!(cache.teams["home"], "Home");
         assert_eq!(cache.team_ids["home"], "T1");
         let dm = &cache.items[0];
-        assert_eq!((dm.peer_name.as_deref(), dm.user_name.as_deref()), (Some("田中"), Some("田中")));
-        assert_eq!(world.env.store.load_users().unwrap().unwrap()["home"]["U1"], "佐藤");
+        assert_eq!(
+            (dm.peer_name.as_deref(), dm.user_name.as_deref()),
+            (Some("田中"), Some("田中"))
+        );
+        assert_eq!(
+            world.env.store.load_users().unwrap().unwrap()["home"]["U1"],
+            "佐藤"
+        );
         assert_eq!(world.env.store.load_seen().unwrap().unwrap().len(), 2);
     }
 
@@ -678,7 +693,10 @@ mod flow_tests {
 
         fetch_with(&world.env).unwrap();
 
-        assert_eq!(*world.titles.borrow(), ["Home / DM 田中", "Home / #general"]);
+        assert_eq!(
+            *world.titles.borrow(),
+            ["Home / DM 田中", "Home / #general"]
+        );
     }
 
     #[test]
@@ -779,7 +797,10 @@ mod flow_tests {
         assert!(!users["U1"].matched());
         users["U2"].assert();
         users["U0ME"].assert();
-        assert_eq!(world.env.store.load_users().unwrap().unwrap()["home"]["U2"], "田中");
+        assert_eq!(
+            world.env.store.load_users().unwrap().unwrap()["home"]["U2"],
+            "田中"
+        );
     }
 
     #[test]
@@ -850,7 +871,9 @@ mod flow_tests {
                 server,
                 "users.info",
                 &[("user", id)],
-                &format!(r#"{{"ok":true,"user":{{"name":"{id}","profile":{{"display_name":"{name}"}}}}}}"#),
+                &format!(
+                    r#"{{"ok":true,"user":{{"name":"{id}","profile":{{"display_name":"{name}"}}}}}}"#
+                ),
             );
         }
         respond(
@@ -907,11 +930,7 @@ mod flow_tests {
 
     fn carry_over(world: &mut World, random_last_read: &str) {
         let carried = previous_item("home", CARRIED);
-        world
-            .env
-            .store
-            .save_seen(&[carried.key()].into())
-            .unwrap();
+        world.env.store.save_seen(&[carried.key()].into()).unwrap();
         world
             .env
             .store
@@ -1049,7 +1068,10 @@ mod flow_tests {
         let reports = fetch_with(&world.env).unwrap();
 
         assert!(reports[0].result.is_err());
-        assert_eq!(world.env.store.load_cache().unwrap().unwrap().fetched_at, 100);
+        assert_eq!(
+            world.env.store.load_cache().unwrap().unwrap().fetched_at,
+            100
+        );
     }
 
     #[test]
@@ -1078,7 +1100,15 @@ mod flow_tests {
         assert_eq!(cached_ts(&world), [DM, MENTION]);
         assert!(!cache.teams.contains_key("old"));
         assert!(!cache.team_ids.contains_key("old"));
-        assert!(!world.env.store.load_users().unwrap().unwrap().contains_key("old"));
+        assert!(
+            !world
+                .env
+                .store
+                .load_users()
+                .unwrap()
+                .unwrap()
+                .contains_key("old")
+        );
     }
 
     #[test]

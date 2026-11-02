@@ -181,10 +181,12 @@ mod tests {
 
         assert_eq!(load(&keychain, "home").unwrap().as_str(), "xoxp-home");
         // ユーザーが security コマンドで手で入れたときと同じ組で保存する
-        assert!(keychain
-            .items
-            .borrow()
-            .contains_key(&("atme".to_owned(), "home/token".to_owned())));
+        assert!(
+            keychain
+                .items
+                .borrow()
+                .contains_key(&("atme".to_owned(), "home/token".to_owned()))
+        );
     }
 
     #[test]
@@ -203,9 +205,11 @@ mod tests {
 
         let error = load(&keychain, "home").unwrap_err();
 
-        assert!(error
-            .to_string()
-            .starts_with("Couldn't read service=atme account=home/token from the Keychain: "));
+        assert!(
+            error
+                .to_string()
+                .starts_with("Couldn't read service=atme account=home/token from the Keychain: ")
+        );
     }
 
     #[test]

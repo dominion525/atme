@@ -1,7 +1,7 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use reqwest::blocking::Client as HttpClient;
-use serde::de::DeserializeOwned;
 use serde::Deserialize;
+use serde::de::DeserializeOwned;
 
 use crate::credentials::Token;
 use crate::l10n;
@@ -12,10 +12,15 @@ pub const API_URL: &str = "https://slack.com/api";
 impl ReadSource for Client {
     fn channel(&self, channel: &str) -> Option<ChannelState> {
         self.conversation_state(channel)
-            .inspect_err(|error| eprintln!(
+            .inspect_err(|error| {
+                eprintln!(
                     "{}",
-                    l10n::format(l10n::CHANNEL_READ_STATE_FAILED, &[channel, &format!("{error:#}")])
-                ))
+                    l10n::format(
+                        l10n::CHANNEL_READ_STATE_FAILED,
+                        &[channel, &format!("{error:#}")]
+                    )
+                )
+            })
             .ok()
     }
 
@@ -232,7 +237,10 @@ impl Client {
             .with_context(|| l10n::format(l10n::CALL_FAILED, &[method]))?;
         let status = response.status();
         if !status.is_success() {
-            bail!(l10n::format(l10n::HTTP_STATUS, &[method, &status.to_string()]));
+            bail!(l10n::format(
+                l10n::HTTP_STATUS,
+                &[method, &status.to_string()]
+            ));
         }
         let body = response
             .text()
@@ -392,7 +400,11 @@ mod tests {
     #[test]
     fn thread_without_parent_is_an_error() {
         let mut server = Server::new();
-        respond(&mut server, "conversations.replies", r#"{"ok":true,"messages":[]}"#);
+        respond(
+            &mut server,
+            "conversations.replies",
+            r#"{"ok":true,"messages":[]}"#,
+        );
 
         let error = client(&server).thread_state("C1", "1.000100").unwrap_err();
 
@@ -405,7 +417,11 @@ mod tests {
     #[test]
     fn slack_error_is_reported_with_its_code() {
         let mut server = Server::new();
-        respond(&mut server, "auth.test", r#"{"ok":false,"error":"invalid_auth"}"#);
+        respond(
+            &mut server,
+            "auth.test",
+            r#"{"ok":false,"error":"invalid_auth"}"#,
+        );
 
         let error = client(&server).auth_test().unwrap_err();
 
@@ -432,7 +448,10 @@ mod tests {
 
         let error = client(&server).auth_test().unwrap_err();
 
-        assert_eq!(error.to_string(), "Couldn't parse the response of auth.test");
+        assert_eq!(
+            error.to_string(),
+            "Couldn't parse the response of auth.test"
+        );
     }
 
     #[test]
@@ -448,8 +467,16 @@ mod tests {
     #[test]
     fn read_source_treats_errors_as_unknown() {
         let mut server = Server::new();
-        respond(&mut server, "conversations.info", r#"{"ok":false,"error":"channel_not_found"}"#);
-        respond(&mut server, "conversations.replies", r#"{"ok":false,"error":"thread_not_found"}"#);
+        respond(
+            &mut server,
+            "conversations.info",
+            r#"{"ok":false,"error":"channel_not_found"}"#,
+        );
+        respond(
+            &mut server,
+            "conversations.replies",
+            r#"{"ok":false,"error":"thread_not_found"}"#,
+        );
         let client = client(&server);
 
         assert!(client.channel("C1").is_none());

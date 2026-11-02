@@ -165,7 +165,7 @@ fn send(center: &UNUserNotificationCenter, notification: &Notification) -> Resul
     match receiver.recv_timeout(CALLBACK_TIMEOUT) {
         Ok(None) => Ok(()),
         Ok(Some(error)) => Err(error),
-        Err(_) => Err(l10n::text(l10n::NOTIFICATION_NO_RESPONSE).into()),
+        Err(_) => Err(l10n::text(l10n::NOTIFICATION_NO_RESPONSE)),
     }
 }
 
@@ -198,7 +198,10 @@ fn plan(items: &[Item], users: &Users, teams: &BTreeMap<String, String>) -> Vec<
             identifier: format!("summary/{}", items[0].ts),
             title: "atme".into(),
             subtitle: None,
-            message: l10n::format(l10n::AND_MORE, &[&(items.len() - MAX_INDIVIDUAL).to_string()]),
+            message: l10n::format(
+                l10n::AND_MORE,
+                &[&(items.len() - MAX_INDIVIDUAL).to_string()],
+            ),
             open: None,
             covers: items[MAX_INDIVIDUAL..].iter().map(Item::key).collect(),
         });
@@ -226,13 +229,22 @@ mod tests {
     #[test]
     fn each_notification_covers_the_unread_it_tells_about() {
         // 7 件のうち、新しい 5 件は個別に、残りの 2 件はまとめの通知で知らせる
-        let items: Vec<Item> = (1..=7).rev().map(|n| item("C1", &format!("{n}.0"))).collect();
+        let items: Vec<Item> = (1..=7)
+            .rev()
+            .map(|n| item("C1", &format!("{n}.0")))
+            .collect();
 
         let planned = plan(&items, &Users::new(), &BTreeMap::new());
 
         let covered: Vec<Vec<String>> = planned
             .iter()
-            .map(|notification| notification.covers.iter().map(|key| key.ts.clone()).collect())
+            .map(|notification| {
+                notification
+                    .covers
+                    .iter()
+                    .map(|key| key.ts.clone())
+                    .collect()
+            })
             .collect();
         assert_eq!(
             covered,
@@ -391,7 +403,10 @@ mod delivery_tests {
     fn sends_one_by_one_with_a_pause_between() {
         let center = FakeCenter::new(Some(UNAuthorizationStatus::Authorized));
 
-        let sent = deliver(&center, &[notification("a"), notification("b"), notification("c")]);
+        let sent = deliver(
+            &center,
+            &[notification("a"), notification("b"), notification("c")],
+        );
 
         assert_eq!(
             sent,
@@ -411,7 +426,10 @@ mod delivery_tests {
         let mut center = FakeCenter::new(Some(UNAuthorizationStatus::Authorized));
         center.fail = vec!["b"];
 
-        let sent = deliver(&center, &[notification("a"), notification("b"), notification("c")]);
+        let sent = deliver(
+            &center,
+            &[notification("a"), notification("b"), notification("c")],
+        );
 
         // 出せなかった b は、知らせた未読に入れない（次の取得で、もう一度知らせる）
         assert_eq!(

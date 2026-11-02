@@ -129,7 +129,8 @@ fn read_json<T: DeserializeOwned>(path: &Path) -> Result<Option<T>> {
         Ok(text) => text,
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
         Err(error) => {
-            return Err(error).with_context(|| l10n::format(l10n::READ_FAILED, &[&path.display().to_string()]));
+            return Err(error)
+                .with_context(|| l10n::format(l10n::READ_FAILED, &[&path.display().to_string()]));
         }
     };
     let value = serde_json::from_str(&text)
@@ -138,7 +139,9 @@ fn read_json<T: DeserializeOwned>(path: &Path) -> Result<Option<T>> {
 }
 
 fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
-    let dir = path.parent().with_context(|| l10n::text(l10n::NO_SAVE_DIR))?;
+    let dir = path
+        .parent()
+        .with_context(|| l10n::text(l10n::NO_SAVE_DIR))?;
     DirBuilder::new()
         .recursive(true)
         .mode(0o700)
@@ -158,7 +161,8 @@ fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
         .with_context(|| l10n::format(l10n::PERMISSION_FAILED, &[&tmp.display().to_string()]))?;
     file.write_all(&serde_json::to_vec_pretty(value)?)
         .with_context(|| l10n::format(l10n::WRITE_FAILED, &[&tmp.display().to_string()]))?;
-    fs::rename(&tmp, path).with_context(|| l10n::format(l10n::REPLACE_FAILED, &[&path.display().to_string()]))
+    fs::rename(&tmp, path)
+        .with_context(|| l10n::format(l10n::REPLACE_FAILED, &[&path.display().to_string()]))
 }
 
 #[cfg(test)]

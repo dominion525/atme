@@ -1,7 +1,7 @@
 //! ワークスペースの追加と削除（画面から呼ぶ。Keychain と設定ファイルを書き換える）
 use std::collections::BTreeMap;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 
 use crate::config;
 use crate::credentials::Token;
@@ -118,12 +118,20 @@ mod tests {
     fn unknown_team_ids_do_not_match() {
         // まだ取得できていない項目の team_id は分からない。空の team_id 同士も同じとみなさない
         assert!(!already_added(&["home".into()], &ids(&[]), "work", "T2"));
-        assert!(!already_added(&["home".into()], &ids(&[("home", "")]), "work", ""));
+        assert!(!already_added(
+            &["home".into()],
+            &ids(&[("home", "")]),
+            "work",
+            ""
+        ));
     }
 
     #[test]
     fn name_is_the_subdomain() {
-        assert_eq!(name_from_url("https://home.slack.com/").as_deref(), Some("home"));
+        assert_eq!(
+            name_from_url("https://home.slack.com/").as_deref(),
+            Some("home")
+        );
         assert_eq!(
             name_from_url("https://acme.enterprise.slack.com/").as_deref(),
             Some("acme")
@@ -154,8 +162,7 @@ mod flow_tests {
         server
     }
 
-    const ACME: &str =
-        r#"{"ok":true,"user_id":"U1","team":"Acme","team_id":"T2","url":"https://acme.slack.com/"}"#;
+    const ACME: &str = r#"{"ok":true,"user_id":"U1","team":"Acme","team_id":"T2","url":"https://acme.slack.com/"}"#;
 
     fn names(world: &fake::World) -> Vec<String> {
         config::Config::load_from(&world.env.config)
@@ -242,7 +249,10 @@ mod flow_tests {
 
         let error = add_with(&world.env, TOKEN).unwrap_err();
 
-        assert_eq!(error.to_string(), "auth.test didn't return the workspace URL");
+        assert_eq!(
+            error.to_string(),
+            "auth.test didn't return the workspace URL"
+        );
     }
 
     #[test]

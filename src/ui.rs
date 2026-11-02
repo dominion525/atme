@@ -2,13 +2,14 @@
 //! app.rs が状態を集めてここを呼ぶ。tests/appkit.rs は、ここで作った部品を直に確かめる
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Sel};
-use objc2::{sel, MainThreadOnly, Message};
+use objc2::{MainThreadOnly, Message, sel};
 use objc2_app_kit::{
-    NSAlert, NSAlertFirstButtonReturn, NSAlertSecondButtonReturn, NSAlertStyle, NSModalResponse, NSBackingStoreType, NSBox, NSBoxType, NSButton, NSColor,
-    NSControlStateValueOn, NSMenu, NSMenuItem, NSSecureTextField, NSTextField,
-    NSUserInterfaceItemIdentification, NSView, NSWindow, NSWindowStyleMask,
+    NSAlert, NSAlertFirstButtonReturn, NSAlertSecondButtonReturn, NSAlertStyle, NSBackingStoreType,
+    NSBox, NSBoxType, NSButton, NSColor, NSControlStateValueOn, NSMenu, NSMenuItem,
+    NSModalResponse, NSSecureTextField, NSTextField, NSUserInterfaceItemIdentification, NSView,
+    NSWindow, NSWindowStyleMask,
 };
-use objc2_foundation::{ns_string, MainThreadMarker, NSPoint, NSRect, NSSize, NSString};
+use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize, NSString, ns_string};
 
 use crate::l10n;
 use crate::login::LoginState;

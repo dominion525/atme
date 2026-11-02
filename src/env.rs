@@ -11,6 +11,11 @@ use crate::notify;
 use crate::slack;
 use crate::state::{Item, SeenKey, Store, Users};
 
+pub type ReadToken = Box<dyn Fn(&Workspace) -> Result<Token>>;
+pub type SaveToken = Box<dyn Fn(&Token, &str) -> Result<()>>;
+pub type DeleteToken = Box<dyn Fn(&str) -> Result<()>>;
+pub type Notify = Box<dyn Fn(&[Item], &Users, &BTreeMap<String, String>) -> Vec<SeenKey>>;
+
 pub struct Env {
     /// 設定ファイルの置き場所
     pub config: PathBuf,
@@ -18,13 +23,13 @@ pub struct Env {
     /// Slack の API の URL の頭
     pub api: String,
     /// ワークスペースの token を読む
-    pub token: Box<dyn Fn(&Workspace) -> Result<Token>>,
+    pub token: ReadToken,
     /// name のワークスペースの token として保存する
-    pub save_token: Box<dyn Fn(&Token, &str) -> Result<()>>,
+    pub save_token: SaveToken,
     /// name のワークスペースの token を消す
-    pub delete_token: Box<dyn Fn(&str) -> Result<()>>,
+    pub delete_token: DeleteToken,
     /// まだ知らせていない未読を通知し、実際に知らせることができた未読を返す
-    pub notify: Box<dyn Fn(&[Item], &Users, &BTreeMap<String, String>) -> Vec<SeenKey>>,
+    pub notify: Notify,
     /// さかのぼる日付と、通知済みの記録を捨てる境目の基準にする時刻
     pub now: DateTime<Local>,
 }
@@ -94,7 +99,8 @@ pub mod fake {
                 None => anyhow::bail!("no token for {}", workspace.name),
             }),
             save_token: Box::new(move |token, name| {
-                save.borrow_mut().insert(name.to_owned(), token.as_str().to_owned());
+                save.borrow_mut()
+                    .insert(name.to_owned(), token.as_str().to_owned());
                 Ok(())
             }),
             delete_token: Box::new(move |name| {
@@ -108,9 +114,11 @@ pub mod fake {
                 record
                     .borrow_mut()
                     .extend(items.iter().map(|item| item.ts.clone()));
-                record_titles
-                    .borrow_mut()
-                    .extend(items.iter().map(|item| crate::display::location(item, teams)));
+                record_titles.borrow_mut().extend(
+                    items
+                        .iter()
+                        .map(|item| crate::display::location(item, teams)),
+                );
                 items.iter().map(Item::key).collect()
             }),
             // 2026-11-01 12:00。さかのぼる日付は 7 日前の 2026-10-25

@@ -25,23 +25,25 @@ where
     P: Fn(Phase) + Send + 'static,
 {
     let (sender, receiver) = mpsc::channel();
-    let handle = thread::spawn(move || loop {
-        phase(Phase::Fetching);
-        work();
-        let finished = Instant::now();
-        phase(Phase::Idle);
-        match receiver.recv_timeout(interval) {
-            Ok(()) | Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => break,
-        }
-        let elapsed = finished.elapsed();
-        if elapsed < min_gap {
-            phase(Phase::Waiting);
-            if !wait(&receiver, min_gap - elapsed) {
-                break;
+    let handle = thread::spawn(move || {
+        loop {
+            phase(Phase::Fetching);
+            work();
+            let finished = Instant::now();
+            phase(Phase::Idle);
+            match receiver.recv_timeout(interval) {
+                Ok(()) | Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => break,
             }
+            let elapsed = finished.elapsed();
+            if elapsed < min_gap {
+                phase(Phase::Waiting);
+                if !wait(&receiver, min_gap - elapsed) {
+                    break;
+                }
+            }
+            while receiver.try_recv().is_ok() {}
         }
-        while receiver.try_recv().is_ok() {}
     });
     (sender, handle)
 }

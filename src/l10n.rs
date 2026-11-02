@@ -68,7 +68,8 @@ pub const FETCH_COUNTS: &str = "%1$@: %2$@ total, %3$@ new";
 
 // ワークスペースの追加と削除
 pub const KEYCHAIN_WRITE_FAILED: &str = "Couldn't save service=%1$@ account=%2$@ to the Keychain";
-pub const KEYCHAIN_DELETE_FAILED: &str = "Couldn't delete service=%1$@ account=%2$@ from the Keychain";
+pub const KEYCHAIN_DELETE_FAILED: &str =
+    "Couldn't delete service=%1$@ account=%2$@ from the Keychain";
 pub const ALREADY_ADDED: &str = "%@ has already been added";
 pub const NOT_USER_TOKEN: &str = "Paste a User OAuth Token that starts with xoxp-";
 pub const NO_WORKSPACE_URL: &str = "auth.test didn't return the workspace URL";
@@ -274,7 +275,9 @@ mod tests {
     fn has_every_slack_language() {
         assert_eq!(
             languages(),
-            ["de", "es", "fr", "it", "ja", "ko", "pt-BR", "zh-Hans", "zh-Hant"]
+            [
+                "de", "es", "fr", "it", "ja", "ko", "pt-BR", "zh-Hans", "zh-Hant"
+            ]
         );
     }
 

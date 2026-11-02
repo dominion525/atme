@@ -1,6 +1,6 @@
 //! メニューやウインドウの部品を、メインスレッドで直に作って確かめる（Cargo.toml の harness = false）。
 //! 文言は .app の外なので英語（l10n のキーそのもの）になる
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use atme::login::LoginState;
 use atme::menu::{Entry, FetchButton};
@@ -9,31 +9,67 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Sel};
 use objc2::sel;
 use objc2_app_kit::{
-    NSAlertFirstButtonReturn, NSApplication, NSButton, NSColor, NSControlStateValueOff, NSControlStateValueOn,
-    NSEventModifierFlags, NSMenu, NSMenuItem, NSTextField, NSUserInterfaceItemIdentification,
-    NSView, NSWindowStyleMask,
+    NSAlertFirstButtonReturn, NSApplication, NSButton, NSColor, NSControlStateValueOff,
+    NSControlStateValueOn, NSEventModifierFlags, NSMenu, NSMenuItem, NSTextField,
+    NSUserInterfaceItemIdentification, NSView, NSWindowStyleMask,
 };
 use objc2_foundation::{MainThreadMarker, NSObject, NSObjectProtocol, NSString};
+
+/// テストの名前と、メインスレッドで動かす本体
+type Test = (&'static str, fn(MainThreadMarker));
 
 fn main() {
     let mtm = MainThreadMarker::new().expect("テストはメインスレッドで動かす");
     NSApplication::sharedApplication(mtm);
-    let tests: &[(&str, fn(MainThreadMarker))] = &[
+    let tests: &[Test] = &[
         ("message_opens_its_permalink", message_opens_its_permalink),
-        ("headers_and_info_cannot_be_chosen", headers_and_info_cannot_be_chosen),
-        ("fetch_button_follows_its_state", fetch_button_follows_its_state),
-        ("launch_at_login_shows_its_state", launch_at_login_shows_its_state),
-        ("check_for_updates_goes_to_sparkle", check_for_updates_goes_to_sparkle),
+        (
+            "headers_and_info_cannot_be_chosen",
+            headers_and_info_cannot_be_chosen,
+        ),
+        (
+            "fetch_button_follows_its_state",
+            fetch_button_follows_its_state,
+        ),
+        (
+            "launch_at_login_shows_its_state",
+            launch_at_login_shows_its_state,
+        ),
+        (
+            "check_for_updates_goes_to_sparkle",
+            check_for_updates_goes_to_sparkle,
+        ),
         ("other_items_go_to_the_target", other_items_go_to_the_target),
-        ("main_menu_has_paste_and_close", main_menu_has_paste_and_close),
-        ("removal_alert_defaults_to_cancel", removal_alert_defaults_to_cancel),
-        ("only_the_remove_button_removes", only_the_remove_button_removes),
+        (
+            "main_menu_has_paste_and_close",
+            main_menu_has_paste_and_close,
+        ),
+        (
+            "removal_alert_defaults_to_cancel",
+            removal_alert_defaults_to_cancel,
+        ),
+        (
+            "only_the_remove_button_removes",
+            only_the_remove_button_removes,
+        ),
         ("window_without_workspaces", window_without_workspaces),
-        ("window_lists_workspaces_with_remove", window_lists_workspaces_with_remove),
-        ("window_locks_input_while_adding", window_locks_input_while_adding),
+        (
+            "window_lists_workspaces_with_remove",
+            window_lists_workspaces_with_remove,
+        ),
+        (
+            "window_locks_input_while_adding",
+            window_locks_input_while_adding,
+        ),
         ("window_shows_errors_in_red", window_shows_errors_in_red),
-        ("window_has_the_steps_and_escape", window_has_the_steps_and_escape),
-        ("window_title_and_close_button", window_title_and_close_button),
+        (
+            "window_has_the_steps_and_escape",
+            window_has_the_steps_and_escape,
+        ),
+        (
+            "window_title_and_close_button",
+            window_title_and_close_button,
+        ),
     ];
     let mut failed = Vec::new();
     for (name, test) in tests {
@@ -88,8 +124,15 @@ fn message_opens_its_permalink(mtm: MainThreadMarker) {
     assert_eq!(action(&item), Some(sel!(openPermalink:)));
     assert!(is(item.target(), &target));
     assert_eq!(item.indentationLevel(), 1);
-    let permalink = item.representedObject().unwrap().downcast::<NSString>().unwrap();
-    assert_eq!(permalink.to_string(), "https://acme.slack.com/archives/C1/p1");
+    let permalink = item
+        .representedObject()
+        .unwrap()
+        .downcast::<NSString>()
+        .unwrap();
+    assert_eq!(
+        permalink.to_string(),
+        "https://acme.slack.com/archives/C1/p1"
+    );
 }
 
 fn headers_and_info_cannot_be_chosen(mtm: MainThreadMarker) {
@@ -101,7 +144,10 @@ fn headers_and_info_cannot_be_chosen(mtm: MainThreadMarker) {
     ] {
         assert!(!item(entry, &target, mtm).isEnabled());
     }
-    assert_eq!(item(Entry::NoItems, &target, mtm).title().to_string(), "None");
+    assert_eq!(
+        item(Entry::NoItems, &target, mtm).title().to_string(),
+        "None"
+    );
     assert!(item(Entry::Separator, &target, mtm).isSeparatorItem());
 }
 
@@ -125,7 +171,11 @@ fn launch_at_login_shows_its_state(mtm: MainThreadMarker) {
     let target = target();
     let on = item(Entry::LaunchAtLogin(LoginState::On), &target, mtm);
     let off = item(Entry::LaunchAtLogin(LoginState::Off), &target, mtm);
-    let approval = item(Entry::LaunchAtLogin(LoginState::NeedsApproval), &target, mtm);
+    let approval = item(
+        Entry::LaunchAtLogin(LoginState::NeedsApproval),
+        &target,
+        mtm,
+    );
 
     assert_eq!(on.state(), NSControlStateValueOn);
     assert_eq!(off.state(), NSControlStateValueOff);
@@ -179,7 +229,11 @@ fn main_menu_has_paste_and_close(mtm: MainThreadMarker) {
 
     let paste = find(&menu, sel!(paste:)).expect("貼り付けの項目が無い");
     assert_eq!(paste.keyEquivalent().to_string(), "v");
-    assert!(paste.keyEquivalentModifierMask().contains(NSEventModifierFlags::Command));
+    assert!(
+        paste
+            .keyEquivalentModifierMask()
+            .contains(NSEventModifierFlags::Command)
+    );
     let close = find(&menu, sel!(closeWorkspaces:)).expect("閉じる項目が無い");
     assert_eq!(close.keyEquivalent().to_string(), "w");
     assert!(is(close.target(), &target));
@@ -195,7 +249,10 @@ fn removal_alert_defaults_to_cancel(mtm: MainThreadMarker) {
     assert_eq!(alert.messageText().to_string(), "Remove Acme?");
     assert!(alert.informativeText().to_string().contains("Keychain"));
     let buttons = alert.buttons();
-    let titles: Vec<String> = buttons.iter().map(|button| button.title().to_string()).collect();
+    let titles: Vec<String> = buttons
+        .iter()
+        .map(|button| button.title().to_string())
+        .collect();
     assert_eq!(titles, ["Cancel", "Remove"]);
     // 既定のボタン（Return）は「キャンセル」。「削除」は破壊的な操作として出し、Return では押されない
     assert_eq!(buttons.objectAtIndex(0).keyEquivalent().to_string(), "\r");
@@ -218,7 +275,11 @@ fn only_the_remove_button_removes(mtm: MainThreadMarker) {
         // NSAlert は、i 番目に足したボタンの応答を NSAlertFirstButtonReturn + i にする
         let response = NSAlertFirstButtonReturn + index as isize;
         let title = button.title().to_string();
-        assert_eq!(ui::removal_confirmed(response), title == "Remove", "{title}");
+        assert_eq!(
+            ui::removal_confirmed(response),
+            title == "Remove",
+            "{title}"
+        );
     }
     let cancel = (ui::REMOVAL_CANCEL - NSAlertFirstButtonReturn) as usize;
     assert_eq!(buttons.objectAtIndex(cancel).title().to_string(), "Cancel");
@@ -299,8 +360,14 @@ impl Window {
                 continue;
             }
             assert!(frame.origin.x >= ui::MARGIN, "{frame:?}");
-            assert!(frame.origin.x + frame.size.width <= ui::WINDOW_WIDTH - ui::MARGIN, "{frame:?}");
-            assert!(frame.origin.y >= 0.0 && frame.origin.y + frame.size.height <= self.height, "{frame:?}");
+            assert!(
+                frame.origin.x + frame.size.width <= ui::WINDOW_WIDTH - ui::MARGIN,
+                "{frame:?}"
+            );
+            assert!(
+                frame.origin.y >= 0.0 && frame.origin.y + frame.size.height <= self.height,
+                "{frame:?}"
+            );
         }
     }
 }
@@ -311,7 +378,12 @@ fn window_without_workspaces(mtm: MainThreadMarker) {
     let window = window(&[], Status::None, false, &field, &target, mtm);
 
     window.text("No workspaces");
-    assert!(window.buttons().iter().all(|button| button.title().to_string() != "Remove"));
+    assert!(
+        window
+            .buttons()
+            .iter()
+            .all(|button| button.title().to_string() != "Remove")
+    );
     window.assert_fits();
     assert_eq!(field.placeholderString().unwrap().to_string(), "xoxp-…");
 }
@@ -347,7 +419,14 @@ fn window_locks_input_while_adding(mtm: MainThreadMarker) {
     let target = target();
     let field = ui::token_field(mtm);
 
-    let adding = window(&[], Status::Info("Checking…".into()), true, &field, &target, mtm);
+    let adding = window(
+        &[],
+        Status::Info("Checking…".into()),
+        true,
+        &field,
+        &target,
+        mtm,
+    );
     assert!(!field.isEnabled());
     assert!(!adding.button("Add").isEnabled());
 
@@ -364,16 +443,44 @@ fn window_shows_errors_in_red(mtm: MainThreadMarker) {
     let field = ui::token_field(mtm);
     let red = NSColor::systemRedColor();
 
-    let error = window(&[], Status::Error("auth.test failed: invalid_auth".into()), false, &field, &target, mtm);
+    let error = window(
+        &[],
+        Status::Error("auth.test failed: invalid_auth".into()),
+        false,
+        &field,
+        &target,
+        mtm,
+    );
     let text = error.text("auth.test failed: invalid_auth");
-    assert!(text.textColor().is_some_and(|color| color.isEqual(Some(&red))));
+    assert!(
+        text.textColor()
+            .is_some_and(|color| color.isEqual(Some(&red)))
+    );
 
-    let info = window(&[], Status::Info("Added Acme".into()), false, &field, &target, mtm);
+    let info = window(
+        &[],
+        Status::Info("Added Acme".into()),
+        false,
+        &field,
+        &target,
+        mtm,
+    );
     let text = info.text("Added Acme");
-    assert!(!text.textColor().is_some_and(|color| color.isEqual(Some(&red))));
+    assert!(
+        !text
+            .textColor()
+            .is_some_and(|color| color.isEqual(Some(&red)))
+    );
 
     // 長いエラーでも折り返して収まる
-    let long = window(&[], Status::Error("x ".repeat(200)), false, &field, &target, mtm);
+    let long = window(
+        &[],
+        Status::Error("x ".repeat(200)),
+        false,
+        &field,
+        &target,
+        mtm,
+    );
     long.assert_fits();
 }
 

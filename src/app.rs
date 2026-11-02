@@ -5,22 +5,22 @@ use std::ptr::NonNull;
 use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use block2::{DynBlock, RcBlock};
 use chrono::Local;
 use dispatch2::DispatchQueue;
 use objc2::rc::{Allocated, Retained};
 use objc2::runtime::{AnyClass, AnyObject, Bool, ProtocolObject};
-use objc2::{define_class, msg_send, sel, AnyThread, MainThreadOnly};
+use objc2::{AnyThread, MainThreadOnly, define_class, msg_send, sel};
 use objc2_app_kit::{
-    NSApplication, NSButton,
-    NSCellImagePosition, NSImage, NSMenu, NSMenuDelegate, NSMenuItem, NSModalResponse,
-    NSSecureTextField, NSStatusBar, NSStatusItem, NSUserInterfaceItemIdentification,
-    NSVariableStatusItemLength, NSWindow, NSWorkspace, NSWorkspaceDidWakeNotification,
+    NSApplication, NSButton, NSCellImagePosition, NSImage, NSMenu, NSMenuDelegate, NSMenuItem,
+    NSModalResponse, NSSecureTextField, NSStatusBar, NSStatusItem,
+    NSUserInterfaceItemIdentification, NSVariableStatusItemLength, NSWindow, NSWorkspace,
+    NSWorkspaceDidWakeNotification,
 };
 use objc2_foundation::{
-    ns_string, MainThreadMarker, NSBundle, NSDictionary, NSError, NSNotification, NSObject,
-    NSObjectProtocol, NSRunLoop, NSRunLoopCommonModes, NSSize, NSString, NSTimer, NSURL,
+    MainThreadMarker, NSBundle, NSDictionary, NSError, NSNotification, NSObject, NSObjectProtocol,
+    NSRunLoop, NSRunLoopCommonModes, NSSize, NSString, NSTimer, NSURL, ns_string,
 };
 use objc2_service_management::SMAppService;
 use objc2_user_notifications::{
@@ -510,7 +510,10 @@ fn confirm_removal(name: String) {
     }) else {
         return;
     };
-    let shown = Store::open().map_or_else(|_| name.clone(), |store| controller::shown_name(&store, &name));
+    let shown = Store::open().map_or_else(
+        |_| name.clone(),
+        |store| controller::shown_name(&store, &name),
+    );
     let alert = ui::removal_alert(&shown, &target, mtm);
     let handler = RcBlock::new(move |response: NSModalResponse| {
         if ui::removal_confirmed(response) {

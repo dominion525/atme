@@ -1,12 +1,12 @@
 use std::collections::BTreeMap;
 use std::fmt::Display;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use chrono::{Local, TimeZone};
 
 use crate::display;
 use crate::l10n;
-use crate::state::{ts_seconds, Cache, Store, Users};
+use crate::state::{Cache, Store, Users, ts_seconds};
 
 const TEXT_CHARS: usize = 100;
 
