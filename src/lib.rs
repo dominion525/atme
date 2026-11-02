@@ -17,3 +17,4 @@ pub mod scheduler;
 pub mod setup;
 pub mod slack;
 pub mod state;
+pub mod ui;

@@ -8,18 +8,17 @@ use block2::{DynBlock, RcBlock};
 use chrono::Local;
 use dispatch2::DispatchQueue;
 use objc2::rc::{Allocated, Retained};
-use objc2::runtime::{AnyClass, AnyObject, Bool, ProtocolObject, Sel};
-use objc2::{define_class, msg_send, sel, AnyThread, DefinedClass, MainThreadOnly, Message};
+use objc2::runtime::{AnyClass, AnyObject, Bool, ProtocolObject};
+use objc2::{define_class, msg_send, sel, AnyThread, DefinedClass, MainThreadOnly};
 use objc2_app_kit::{
-    NSAlert, NSAlertFirstButtonReturn, NSAlertSecondButtonReturn, NSAlertStyle, NSApplication, NSBox, NSBoxType, NSColor, NSModalResponse, NSBackingStoreType, NSButton, NSCellImagePosition, NSControlStateValueOn, NSImage,
-    NSMenu, NSMenuDelegate, NSMenuItem, NSSecureTextField, NSStatusBar, NSStatusItem, NSTextField,
-    NSUserInterfaceItemIdentification, NSVariableStatusItemLength, NSView, NSWindow, NSWindowStyleMask,
-    NSWorkspace, NSWorkspaceDidWakeNotification,
+    NSAlertFirstButtonReturn, NSAlertSecondButtonReturn, NSApplication, NSButton,
+    NSCellImagePosition, NSImage, NSMenu, NSMenuDelegate, NSMenuItem, NSModalResponse,
+    NSSecureTextField, NSStatusBar, NSStatusItem, NSUserInterfaceItemIdentification,
+    NSVariableStatusItemLength, NSWindow, NSWorkspace, NSWorkspaceDidWakeNotification,
 };
 use objc2_foundation::{
-    ns_string, MainThreadMarker, NSBundle, NSDictionary, NSError, NSNotification,
-    NSObject, NSObjectProtocol, NSPoint, NSRect, NSRunLoop, NSRunLoopCommonModes, NSSize, NSString,
-    NSTimer, NSURL,
+    ns_string, MainThreadMarker, NSBundle, NSDictionary, NSError, NSNotification, NSObject,
+    NSObjectProtocol, NSRunLoop, NSRunLoopCommonModes, NSSize, NSString, NSTimer, NSURL,
 };
 use objc2_service_management::SMAppService;
 use objc2_user_notifications::{
@@ -33,7 +32,7 @@ use crate::fetch;
 use crate::l10n;
 use crate::login::{self, LoginState};
 use crate::manifest;
-use crate::menu::{self, Entry, FetchButton, Menu};
+use crate::menu::{self, Menu};
 use crate::notify::PERMALINK_KEY;
 use crate::scheduler::{self, Phase};
 use crate::setup;
@@ -65,18 +64,9 @@ struct Ui {
     window: Option<Retained<NSWindow>>,
     token_field: Option<Retained<NSSecureTextField>>,
     /// ウインドウの下に出す、確認中・追加できた・失敗の文
-    setup_status: Status,
+    setup_status: crate::ui::Status,
     /// token を確かめているあいだは「追加」を押せなくする
     adding: bool,
-}
-
-/// ワークスペースのウインドウの下に出す文。失敗は赤で出す
-#[derive(Clone, Default)]
-enum Status {
-    #[default]
-    None,
-    Info(String),
-    Error(String),
 }
 
 /// メニューバーの絵。atme.app の Resources から読む。読めなければ文字の @ で代わりにする
@@ -212,7 +202,7 @@ define_class!(
                     return None;
                 }
                 ui.adding = true;
-                ui.setup_status = Status::Info(l10n::text(l10n::CHECKING));
+                ui.setup_status = crate::ui::Status::Info(l10n::text(l10n::CHECKING));
                 Some(token)
             });
             let Some(token) = token else {
@@ -229,8 +219,8 @@ define_class!(
                         if let Some(ui) = ui.borrow_mut().as_mut() {
                             ui.adding = false;
                             ui.setup_status = match &result {
-                                Ok(team) => Status::Info(l10n::format(l10n::ADDED, &[team])),
-                                Err(error) => Status::Error(error.clone()),
+                                Ok(team) => crate::ui::Status::Info(l10n::format(l10n::ADDED, &[team])),
+                                Err(error) => crate::ui::Status::Error(error.clone()),
                             };
                             if let (true, Some(field)) = (added, &ui.token_field) {
                                 field.setStringValue(ns_string!(""));
@@ -379,7 +369,8 @@ pub fn run() -> Result<()> {
     menu.setAutoenablesItems(false);
     menu.setDelegate(Some(ProtocolObject::from_ref(&*target)));
     status_item.setMenu(Some(&menu));
-    install_main_menu(&app, &target, mtm);
+    let menu_target: &AnyObject = &target;
+    app.setMainMenu(Some(&crate::ui::main_menu(menu_target, mtm)));
     UI.with(|ui| {
         *ui.borrow_mut() = Some(Ui {
             status_item,
@@ -396,7 +387,7 @@ pub fn run() -> Result<()> {
             updater: start_updater(),
             window: None,
             token_field: None,
-            setup_status: Status::None,
+            setup_status: crate::ui::Status::None,
             adding: false,
         })
     });
@@ -582,149 +573,13 @@ fn show(ui: &mut Ui, model: &Menu, mtm: MainThreadMarker) {
     ui.badge = model.badge.clone();
     update_icon(ui, mtm);
     ui.menu.removeAllItems();
-    for entry in &model.entries {
-        ui.menu.addItem(&menu_item(entry, ui, mtm));
-    }
-}
-
-fn menu_item(entry: &Entry, ui: &Ui, mtm: MainThreadMarker) -> Retained<NSMenuItem> {
     let target: &AnyObject = &ui.target;
-    match entry {
-        Entry::Separator => NSMenuItem::separatorItem(mtm),
-        Entry::Info(text) => {
-            let item = new_item(text, None, mtm);
-            item.setEnabled(false);
-            item
-        }
-        Entry::Header(name) => {
-            let item = new_item(name, None, mtm);
-            item.setEnabled(false);
-            item
-        }
-        Entry::Message { label, permalink } => {
-            let item = new_item(label, Some(sel!(openPermalink:)), mtm);
-            item.setIndentationLevel(1);
-            let permalink = NSString::from_str(permalink);
-            let permalink: &AnyObject = &permalink;
-            unsafe {
-                item.setTarget(Some(target));
-                item.setRepresentedObject(Some(permalink));
-            }
-            item
-        }
-        Entry::NoItems => {
-            let item = new_item(&l10n::text(l10n::NONE), None, mtm);
-            item.setIndentationLevel(1);
-            item.setEnabled(false);
-            item
-        }
-        Entry::DismissAll => {
-            let item = new_item(&l10n::text(l10n::MARK_ALL_AS_READ), Some(sel!(dismissAll:)), mtm);
-            unsafe { item.setTarget(Some(target)) };
-            item
-        }
-        Entry::Fetch(button) => {
-            let title = match button {
-                FetchButton::Ready => l10n::text(l10n::FETCH_NOW),
-                FetchButton::Cooldown(seconds) => {
-                    l10n::format(l10n::FETCH_NOW_IN, &[&seconds.to_string()])
-                },
-                FetchButton::Waiting => l10n::text(l10n::WAITING_TO_FETCH),
-                FetchButton::Fetching => l10n::text(l10n::FETCHING),
-            };
-            let item = new_item(&title, Some(sel!(fetchNow:)), mtm);
-            item.setEnabled(*button == FetchButton::Ready);
-            unsafe { item.setTarget(Some(target)) };
-            item
-        }
-        Entry::Workspaces => {
-            let item = new_item(&l10n::text(l10n::WORKSPACES), Some(sel!(openWorkspaces:)), mtm);
-            unsafe { item.setTarget(Some(target)) };
-            item
-        }
-        Entry::LaunchAtLogin(state) => {
-            let title = match state {
-                LoginState::NeedsApproval => l10n::text(l10n::OPEN_AT_LOGIN_NEEDS_APPROVAL),
-                LoginState::On | LoginState::Off => l10n::text(l10n::OPEN_AT_LOGIN),
-            };
-            let item = new_item(&title, Some(sel!(toggleLogin:)), mtm);
-            if *state == LoginState::On {
-                item.setState(NSControlStateValueOn);
-            }
-            unsafe { item.setTarget(Some(target)) };
-            item
-        }
-        Entry::CheckForUpdates => {
-            // SPUStandardUpdaterController の checkForUpdates: を直接呼ばせる
-            let item = new_item(&l10n::text(l10n::CHECK_FOR_UPDATES), Some(sel!(checkForUpdates:)), mtm);
-            if let Some(updater) = &ui.updater {
-                unsafe { item.setTarget(Some(updater)) };
-            }
-            item
-        }
-        Entry::Quit => {
-            let item = new_item(&l10n::text(l10n::QUIT), Some(sel!(quit:)), mtm);
-            unsafe { item.setTarget(Some(target)) };
-            item
-        }
+    for entry in &model.entries {
+        ui.menu
+            .addItem(&crate::ui::menu_item(entry, target, ui.updater.as_deref(), mtm));
     }
 }
 
-fn new_item(title: &str, action: Option<Sel>, mtm: MainThreadMarker) -> Retained<NSMenuItem> {
-    unsafe {
-        NSMenuItem::initWithTitle_action_keyEquivalent(
-            NSMenuItem::alloc(mtm),
-            &NSString::from_str(title),
-            action,
-            ns_string!(""),
-        )
-    }
-}
-
-/// アプリのメインメニューに「編集」を置く。Dock に出ないアプリではメインメニューは画面に出ないが、
-/// これがあると入力欄で ⌘V（貼り付け）などのキー操作が効く
-fn install_main_menu(app: &NSApplication, target: &MenuTarget, mtm: MainThreadMarker) {
-    let main = NSMenu::new(mtm);
-    // ⌘W で、ワークスペースのウインドウ（確認のシートが出ていればシート）を閉じる。
-    // ⌘ の付かない Esc はメインメニューでは処理されないので、ウインドウとシートに置いたボタンで受ける（escape_button）
-    let window = NSMenu::new(mtm);
-    let close = unsafe {
-        NSMenuItem::initWithTitle_action_keyEquivalent(
-            NSMenuItem::alloc(mtm),
-            ns_string!("Close"),
-            Some(sel!(closeWorkspaces:)),
-            ns_string!("w"),
-        )
-    };
-    unsafe { close.setTarget(Some(target)) };
-    window.addItem(&close);
-    let window_item = NSMenuItem::new(mtm);
-    window_item.setSubmenu(Some(&window));
-    main.addItem(&window_item);
-    let edit = NSMenu::new(mtm);
-    for (title, action, key) in [
-        ("Undo", sel!(undo:), "z"),
-        ("Redo", sel!(redo:), "Z"),
-        ("Cut", sel!(cut:), "x"),
-        ("Copy", sel!(copy:), "c"),
-        ("Paste", sel!(paste:), "v"),
-        ("Select All", sel!(selectAll:), "a"),
-    ] {
-        let item = unsafe {
-            NSMenuItem::initWithTitle_action_keyEquivalent(
-                NSMenuItem::alloc(mtm),
-                &NSString::from_str(title),
-                Some(action),
-                &NSString::from_str(key),
-            )
-        };
-        edit.addItem(&item);
-    }
-    let edit_item = NSMenuItem::new(mtm);
-    edit_item.setSubmenu(Some(&edit));
-    main.addItem(&edit_item);
-    app.setMainMenu(Some(&main));
-}
 
 /// 「削除」を押したときに、ワークスペースのウインドウに確認のシートを出す。
 /// 「削除」を選んだときだけ外す。既定のボタン（Return）は「キャンセル」。⌘W と Esc もキャンセルになる（closeWorkspaces:）
@@ -740,19 +595,10 @@ fn confirm_removal(name: String, trigger: Sender<()>) {
         .and_then(|store| store.load_cache().ok().flatten())
         .and_then(|cache| cache.teams.get(&name).cloned())
         .unwrap_or_else(|| name.clone());
-    let alert = NSAlert::new(mtm);
-    alert.setAlertStyle(NSAlertStyle::Warning);
-    alert.setMessageText(&NSString::from_str(&l10n::format(l10n::REMOVE_CONFIRM, &[&shown])));
-    alert.setInformativeText(&NSString::from_str(&l10n::text(l10n::REMOVE_CONFIRM_DETAIL)));
-    // 先に足したボタンが右端の既定のボタンになる。消すのは取り返しがつかないので、既定は「キャンセル」にする
-    let cancel = alert.addButtonWithTitle(&NSString::from_str(&l10n::text(l10n::CANCEL)));
-    cancel.setKeyEquivalent(ns_string!("\r"));
-    let remove = alert.addButtonWithTitle(&NSString::from_str(&l10n::text(l10n::REMOVE)));
-    remove.setKeyEquivalent(ns_string!(""));
-    remove.setHasDestructiveAction(true);
-    if let Some(target) = UI.with(|ui| ui.borrow().as_ref().map(|ui| ui.target.clone())) {
-        alert.setAccessoryView(Some(&escape_button(&target, mtm)));
-    }
+    let Some(target) = UI.with(|ui| ui.borrow().as_ref().map(|ui| ui.target.clone())) else {
+        return;
+    };
+    let alert = crate::ui::removal_alert(&shown, &target, mtm);
     let handler = RcBlock::new(move |response: NSModalResponse| {
         if response == NSAlertSecondButtonReturn {
             remove_now(&name, &trigger);
@@ -764,8 +610,8 @@ fn confirm_removal(name: String, trigger: Sender<()>) {
 /// 設定ファイルと Keychain から外し、ウインドウを作り直して取得し直す
 fn remove_now(name: &str, trigger: &Sender<()>) {
     let status = match setup::remove(name) {
-        Ok(()) => Status::None,
-        Err(error) => Status::Error(format!("{error:#}")),
+        Ok(()) => crate::ui::Status::None,
+        Err(error) => crate::ui::Status::Error(format!("{error:#}")),
     };
     UI.with(|ui| {
         if let Some(ui) = ui.borrow_mut().as_mut() {
@@ -791,237 +637,56 @@ fn open_workspaces() {
     NSApplication::sharedApplication(mtm).activateIgnoringOtherApps(true);
 }
 
-// ワークスペースのウインドウの幅と余白。部品は座標で置く（Auto Layout の fittingSize では幅が足りず、はみ出したため）
-const WINDOW_WIDTH: f64 = 480.0;
-const MARGIN: f64 = 20.0;
-const GAP: f64 = 10.0;
-
-/// ウインドウの 1 行。左の部品は残りの幅いっぱい、右の部品（ボタン）は右端に置く
-struct Row {
-    left: Retained<NSView>,
-    left_height: f64,
-    right: Option<(Retained<NSView>, NSSize)>,
-}
-
-/// 行を上から順に置いたときの、各行の左と右の部品の位置と、全体の高さ。座標は AppKit と同じく左下が原点
-fn layout(rows: &[(f64, Option<NSSize>)], width: f64) -> (Vec<(NSRect, Option<NSRect>)>, f64) {
-    let heights: Vec<f64> = rows
-        .iter()
-        .map(|(left, right)| right.map_or(*left, |size| left.max(size.height)))
-        .collect();
-    let height = MARGIN * 2.0
-        + heights.iter().sum::<f64>()
-        + GAP * heights.len().saturating_sub(1) as f64;
-    let mut top = MARGIN;
-    let frames = rows
-        .iter()
-        .zip(&heights)
-        .map(|((left, right), row)| {
-            // 行の高さの中で、上下の真ん中にそろえる
-            let bottom = height - top - row;
-            let right_width = right.map_or(0.0, |size| size.width + GAP);
-            let left_frame = NSRect::new(
-                NSPoint::new(MARGIN, bottom + (row - left) / 2.0),
-                NSSize::new(width - MARGIN * 2.0 - right_width, *left),
-            );
-            let right_frame = right.map(|size| {
-                NSRect::new(
-                    NSPoint::new(width - MARGIN - size.width, bottom + (row - size.height) / 2.0),
-                    size,
-                )
-            });
-            top += row + GAP;
-            (left_frame, right_frame)
-        })
-        .collect();
-    (frames, height)
-}
-
 /// ワークスペースのウインドウの中身を、今の設定から作り直す。まだ開いていなければ作る
 fn show_workspaces() {
     let Some(mtm) = MainThreadMarker::new() else {
         return;
     };
-    let workspaces: Vec<String> = Config::load()
-        .map(|config| config.workspace.into_iter().map(|w| w.name).collect())
-        .unwrap_or_default();
     let teams = Store::open()
         .ok()
         .and_then(|store| store.load_cache().ok().flatten())
         .map(|cache| cache.teams)
+        .unwrap_or_default();
+    // 設定の name は内部の名前なので、Slack 上の名前が分かればそちらだけを出す
+    let workspaces: Vec<crate::ui::ShownWorkspace> = Config::load()
+        .map(|config| {
+            config
+                .workspace
+                .into_iter()
+                .map(|workspace| crate::ui::ShownWorkspace {
+                    shown: teams.get(&workspace.name).unwrap_or(&workspace.name).clone(),
+                    name: workspace.name,
+                })
+                .collect()
+        })
         .unwrap_or_default();
     UI.with(|ui| {
         let mut ui = ui.borrow_mut();
         let Some(ui) = ui.as_mut() else {
             return;
         };
-        let target: &AnyObject = &ui.target;
-        let text_width = WINDOW_WIDTH - MARGIN * 2.0;
-        let mut rows = Vec::new();
-        if workspaces.is_empty() {
-            rows.push(text_row(wrapping_label(&l10n::text(l10n::NO_WORKSPACES), mtm), text_width));
-        }
-        for name in &workspaces {
-            // 設定の name は内部の名前なので、Slack 上の名前が分かればそちらだけを出す
-            let shown = label(teams.get(name).unwrap_or(name), mtm);
-            let remove = button(&l10n::text(l10n::REMOVE), sel!(removeWorkspace:), target, mtm);
-            remove.setIdentifier(Some(&NSString::from_str(name)));
-            rows.push(button_row(&shown, remove));
-        }
-        // 一覧と、足す手順のあいだの区切り
-        rows.push(separator_row(mtm));
-        // 先に Slack App を作り、そのあとで出てくる token を貼る、という順番が分かるよう、手順に番号を振って上から並べる
-        let create = button(&l10n::text(l10n::CREATE_SLACK_APP), sel!(createSlackApp:), target, mtm);
-        rows.push(button_row(&wrapping_label(&l10n::text(l10n::STEP_CREATE), mtm), create));
-        rows.push(text_row(wrapping_label(&l10n::text(l10n::STEP_INSTALL), mtm), text_width));
-        rows.push(text_row(wrapping_label(&l10n::text(l10n::STEP_PASTE), mtm), text_width));
         let field = ui
             .token_field
-            .get_or_insert_with(|| {
-                let field = NSSecureTextField::new(mtm);
-                field.setPlaceholderString(Some(ns_string!("xoxp-…")));
-                field
-            })
+            .get_or_insert_with(|| crate::ui::token_field(mtm))
             .clone();
-        let add = button(&l10n::text(l10n::ADD), sel!(addWorkspace:), target, mtm);
-        // 確かめているあいだは、入力欄も「追加」も触れないようにする
-        field.setEnabled(!ui.adding);
-        add.setEnabled(!ui.adding);
-        add.setKeyEquivalent(ns_string!("\r"));
-        rows.push(button_row(&field, add));
-        let status = match &ui.setup_status {
-            Status::None => wrapping_label("", mtm),
-            Status::Info(text) => wrapping_label(text, mtm),
-            Status::Error(text) => {
-                let error = wrapping_label(text, mtm);
-                error.setTextColor(Some(&NSColor::systemRedColor()));
-                error
-            }
-        };
-        rows.push(text_row(status, text_width));
-
-        let sizes: Vec<(f64, Option<NSSize>)> = rows
-            .iter()
-            .map(|row| (row.left_height, row.right.as_ref().map(|(_, size)| *size)))
-            .collect();
-        let (frames, height) = layout(&sizes, WINDOW_WIDTH);
-        let content = NSView::initWithFrame(
-            NSView::alloc(mtm),
-            NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(WINDOW_WIDTH, height)),
+        let target: &AnyObject = &ui.target;
+        let (content, height) = crate::ui::workspace_content(
+            &workspaces,
+            &ui.setup_status,
+            ui.adding,
+            &field,
+            target,
+            mtm,
         );
-        content.addSubview(&escape_button(target, mtm));
-        for (row, (left, right)) in rows.iter().zip(frames) {
-            row.left.setFrame(left);
-            content.addSubview(&row.left);
-            if let (Some((view, _)), Some(frame)) = (&row.right, right) {
-                view.setFrame(frame);
-                content.addSubview(view);
-            }
-        }
-
         let window = ui
             .window
-            .get_or_insert_with(|| {
-                let window = unsafe {
-                    NSWindow::initWithContentRect_styleMask_backing_defer(
-                        NSWindow::alloc(mtm),
-                        NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(WINDOW_WIDTH, height)),
-                        NSWindowStyleMask::Titled | NSWindowStyleMask::Closable,
-                        NSBackingStoreType::Buffered,
-                        false,
-                    )
-                };
-                unsafe { window.setReleasedWhenClosed(false) };
-                window.setTitle(&NSString::from_str(&l10n::text(l10n::WORKSPACES_TITLE)));
-                window
-            })
+            .get_or_insert_with(|| crate::ui::workspace_window(height, mtm))
             .clone();
         window.setContentView(Some(&content));
-        window.setContentSize(NSSize::new(WINDOW_WIDTH, height));
+        window.setContentSize(NSSize::new(crate::ui::WINDOW_WIDTH, height));
         window.center();
         window.makeFirstResponder(Some(&field));
     });
-}
-
-/// 幅いっぱいの区切りの線の行
-fn separator_row(mtm: MainThreadMarker) -> Row {
-    let line = NSBox::new(mtm);
-    line.setBoxType(NSBoxType::Separator);
-    Row {
-        left: as_view(&line),
-        left_height: 1.0,
-        right: None,
-    }
-}
-
-/// 幅いっぱいの文の行。長い文は折り返し、その高さにする
-fn text_row(text: Retained<NSTextField>, width: f64) -> Row {
-    text.setPreferredMaxLayoutWidth(width);
-    let height = text.fittingSize().height.max(17.0);
-    Row {
-        left: as_view(&text),
-        left_height: height,
-        right: None,
-    }
-}
-
-/// 左に部品、右端にボタンを置く行。左の高さは部品に合わせる
-fn button_row(left: &NSView, right: Retained<NSButton>) -> Row {
-    right.sizeToFit();
-    let right_size = right.frame().size;
-    let left_height = if left.downcast_ref::<NSSecureTextField>().is_some() {
-        // 入力欄は文字が無いと高さが決まらないので、標準の高さにする
-        22.0
-    } else {
-        // 文はボタンの左の幅で折り返し、その高さにする
-        if let Some(text) = left.downcast_ref::<NSTextField>() {
-            text.setPreferredMaxLayoutWidth(WINDOW_WIDTH - MARGIN * 2.0 - right_size.width - GAP);
-        }
-        left.fittingSize().height
-    };
-    Row {
-        left: left.retain(),
-        left_height,
-        right: Some((as_view(&right), right_size)),
-    }
-}
-
-fn as_view(view: &NSView) -> Retained<NSView> {
-    view.retain()
-}
-
-fn button(title: &str, action: Sel, target: &AnyObject, mtm: MainThreadMarker) -> Retained<NSButton> {
-    unsafe {
-        NSButton::buttonWithTitle_target_action(
-            &NSString::from_str(title),
-            Some(target),
-            Some(action),
-            mtm,
-        )
-    }
-}
-
-/// Esc で closeWorkspaces: を呼ぶ、見えないボタン（大きさ 0・透明）。
-/// ⌘ の付かないキーはメニューではなくウインドウの中のボタンが受けるので、ウインドウとシートに 1 つずつ置く
-fn escape_button(target: &AnyObject, mtm: MainThreadMarker) -> Retained<NSButton> {
-    let escape = button("", sel!(closeWorkspaces:), target, mtm);
-    escape.setKeyEquivalent(ns_string!("\u{1b}"));
-    escape.setTransparent(true);
-    escape.setFrame(NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0)));
-    escape
-}
-
-fn label(text: &str, mtm: MainThreadMarker) -> Retained<NSTextField> {
-    let label = NSTextField::labelWithString(&NSString::from_str(text), mtm);
-    label.setSelectable(true);
-    label
-}
-
-/// 幅に収まらないときに折り返す文。labelWithString の部品は 1 行用で、折り返し幅を決めても折り返さない
-fn wrapping_label(text: &str, mtm: MainThreadMarker) -> Retained<NSTextField> {
-    let label = NSTextField::wrappingLabelWithString(&NSString::from_str(text), mtm);
-    label.setSelectable(true);
-    label
 }
 
 pub fn permalink(info: &NSDictionary) -> Option<String> {
@@ -1058,39 +723,6 @@ fn request_authorization(center: &UNUserNotificationCenter) {
 mod tests {
     use super::*;
     use crate::notify::user_info;
-
-    fn max_x(rect: NSRect) -> f64 {
-        rect.origin.x + rect.size.width
-    }
-
-    #[test]
-    fn layout_keeps_every_part_inside_the_window() {
-        let button = NSSize::new(80.0, 32.0);
-        let (frames, height) = layout(
-            &[(17.0, None), (17.0, Some(button)), (22.0, Some(button)), (40.0, None)],
-            WINDOW_WIDTH,
-        );
-
-        for (left, right) in &frames {
-            assert!(left.origin.x >= MARGIN && left.origin.y >= MARGIN);
-            assert!(max_x(*left) <= WINDOW_WIDTH - MARGIN);
-            if let Some(right) = right {
-                assert_eq!(max_x(*right), WINDOW_WIDTH - MARGIN);
-                assert_eq!(max_x(*left) + GAP, right.origin.x);
-            }
-        }
-        // 32 + 32 は行の中でいちばん高い部品（ボタン）の高さ
-        assert_eq!(height, MARGIN * 2.0 + 17.0 + 32.0 + 32.0 + 40.0 + GAP * 3.0);
-    }
-
-    #[test]
-    fn layout_puts_rows_from_the_top() {
-        let (frames, height) = layout(&[(17.0, None), (20.0, None)], WINDOW_WIDTH);
-
-        assert_eq!(frames[0].0.origin.y, height - MARGIN - 17.0);
-        assert_eq!(frames[1].0.origin.y, height - MARGIN - 17.0 - GAP - 20.0);
-        assert_eq!(frames[1].0.origin.y, MARGIN);
-    }
 
     #[test]
     fn reads_permalink_written_by_notify() {
