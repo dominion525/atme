@@ -676,6 +676,58 @@ mod flow_tests {
         }
     }
 
+    /// 検索の範囲から外れた、前回からの home の未読（#random）。通知済みの記録にも入っている
+    const CARRIED: &str = "1793400000.000300";
+
+    fn carry_over(world: &mut World, random_last_read: &str) {
+        let carried = previous_item("home", CARRIED);
+        world
+            .env
+            .store
+            .save_seen(&[carried.key()].into())
+            .unwrap();
+        world
+            .env
+            .store
+            .save_cache(&Cache {
+                fetched_at: 100,
+                items: vec![carried],
+                teams: BTreeMap::new(),
+                team_ids: BTreeMap::new(),
+            })
+            .unwrap();
+        respond(
+            &mut world.server,
+            "conversations.info",
+            &[("channel", "C9")],
+            &format!(r#"{{"ok":true,"channel":{{"last_read":"{random_last_read}"}}}}"#),
+        );
+    }
+
+    #[test]
+    fn carried_over_unread_disappears_once_read_in_slack() {
+        let mut world = world(HOME);
+        slack_for_home(&mut world.server, "0.000000");
+        carry_over(&mut world, CARRIED);
+
+        fetch_with(&world.env).unwrap();
+
+        assert_eq!(cached_ts(&world), [DM, MENTION]);
+    }
+
+    #[test]
+    fn carried_over_unread_stays_until_read() {
+        let mut world = world(HOME);
+        slack_for_home(&mut world.server, "0.000000");
+        carry_over(&mut world, "1793300000.000100");
+
+        fetch_with(&world.env).unwrap();
+
+        assert_eq!(cached_ts(&world), [DM, MENTION, CARRIED]);
+        // 前回から残っているだけなので、もう一度は通知しない
+        assert_eq!(*world.notified.borrow(), [DM, MENTION]);
+    }
+
     #[test]
     fn a_failing_workspace_keeps_its_previous_items() {
         // work は token が読めずに失敗する。前回の work の未読は残す
