@@ -106,7 +106,7 @@ mod tests {
             NO_GAP,
             move || {
                 done.send(()).unwrap();
-                let _ = gate.recv_timeout(WAIT);
+                let _ = gate.recv();
             },
             |_| {},
         );
@@ -144,17 +144,20 @@ mod tests {
 
     #[test]
     fn reports_phases() {
-        // 合図は 1 回目の取得が終わる前に送っておく。終わった直後に受け取るので、前回からの時間は必ず gap より短く、待ちを通る
-        let gap = Duration::from_millis(300);
+        // 合図は 1 回目の取得が終わる前に送っておく。終わった直後に受け取るので、前回からの時間は gap（10 秒）より短く、待ちを通る。
+        // 待ちのあとに取得し直すことは waits_min_gap_after_previous_run で確かめるので、ここでは待ちの段階が知らされるところまでを見る
+        let gap = Duration::from_secs(10);
         let (report, phases) = mpsc::channel();
         let (release, gate) = mpsc::channel::<()>();
-        let (trigger, _handle) = spawn(
+        let (trigger, handle) = spawn(
             LONG,
             gap,
             move || {
                 let _ = gate.recv();
             },
-            move |phase| report.send(phase).unwrap(),
+            move |phase| {
+                let _ = report.send(phase);
+            },
         );
 
         trigger.send(()).unwrap();
@@ -162,8 +165,9 @@ mod tests {
         assert_eq!(phases.recv_timeout(WAIT).unwrap(), Phase::Fetching);
         assert_eq!(phases.recv_timeout(WAIT).unwrap(), Phase::Idle);
         assert_eq!(phases.recv_timeout(WAIT).unwrap(), Phase::Waiting);
-        assert_eq!(phases.recv_timeout(WAIT).unwrap(), Phase::Fetching);
-        assert_eq!(phases.recv_timeout(WAIT).unwrap(), Phase::Idle);
+        // 合図の送り手を手放すと、待っている途中でも止まる
+        drop(trigger);
+        handle.join().unwrap();
     }
 
     #[test]
