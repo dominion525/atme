@@ -290,14 +290,12 @@ fn merge(fresh: Vec<Item>, previous: Vec<Item>) -> Vec<Item> {
 }
 
 fn diff(previous: Option<&Seen>, items: &[Item], cutoff: i64) -> (Vec<Item>, Seen) {
-    let new = match previous {
-        Some(seen) => items
-            .iter()
-            .filter(|item| !seen.contains(&item.key()))
-            .cloned()
-            .collect(),
-        None => Vec::new(),
-    };
+    // まだ知らせていない未読は、初めての取得（記録がまだ無いとき）でも知らせる。見落としを防ぐのが atme の目的なので
+    let new = items
+        .iter()
+        .filter(|item| previous.is_none_or(|seen| !seen.contains(&item.key())))
+        .cloned()
+        .collect();
     // 一覧に残っている（未読の）項目は、日数に関係なく残す。消すとまた新着として通知してしまう
     let current: BTreeSet<_> = items.iter().map(Item::key).collect();
     let seen = previous
@@ -442,12 +440,12 @@ mod tests {
     }
 
     #[test]
-    fn first_run_reports_nothing_and_records_all() {
+    fn first_run_reports_every_unread_and_records_all() {
         let items = [item("C1", "1000.000001"), item("C2", "1000.000002")];
 
         let (new, seen) = diff(None, &items, 0);
 
-        assert!(new.is_empty());
+        assert_eq!(new, items);
         assert_eq!(
             seen,
             [key("C1", "1000.000001"), key("C2", "1000.000002")].into()
@@ -662,16 +660,43 @@ mod flow_tests {
     }
 
     #[test]
-    fn first_fetch_saves_without_notifying() {
-        // 初めての取得では、今ある未読をまとめて通知しない
+    fn first_fetch_notifies_the_unread_already_there() {
+        // 初めての取得でも、まだ知らせていない未読は知らせる（見落としを防ぐため）
         let mut world = world(HOME);
         slack_for_home(&mut world.server, "0.000000");
 
         fetch_with(&world.env).unwrap();
 
-        assert!(world.notified.borrow().is_empty());
+        assert_eq!(*world.notified.borrow(), [DM, MENTION]);
         assert_eq!(cached_ts(&world), [DM, MENTION]);
         assert_eq!(world.env.store.load_seen().unwrap().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_workspace_added_later_notifies_its_unread_already_there() {
+        // 別のワークスペース（work）で取得したことがあり、通知済みの記録はある。home は足したばかり
+        let mut world = world(HOME);
+        slack_for_home(&mut world.server, "0.000000");
+        let work = previous_item("work", "1793400000.000300");
+        world.env.store.save_seen(&[work.key()].into()).unwrap();
+
+        fetch_with(&world.env).unwrap();
+
+        assert_eq!(*world.notified.borrow(), [DM, MENTION]);
+    }
+
+    #[test]
+    fn already_notified_unread_is_not_notified_again() {
+        let mut world = world(HOME);
+        slack_for_home(&mut world.server, "0.000000");
+        world.env.store.save_seen(&Seen::new()).unwrap();
+        fetch_with(&world.env).unwrap();
+        world.notified.borrow_mut().clear();
+
+        fetch_with(&world.env).unwrap();
+
+        assert!(world.notified.borrow().is_empty());
+        assert_eq!(cached_ts(&world), [DM, MENTION]);
     }
 
     #[test]

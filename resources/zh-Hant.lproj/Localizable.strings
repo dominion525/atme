@@ -49,7 +49,7 @@
 "Open at Login (needs approval in System Settings)" = "登入時打開（需在「系統設定」中核准）";
 
 /* 通知：個別に出さなかった残りの件数。%@ は件数 */
-"And %@ more" = "另有 %@ 則新訊息";
+"And %@ more" = "另有 %@ 則未讀訊息";
 
 /* メニューと通知：グループ DM の場所の名前 */
 "Group DM" = "群組私訊";
