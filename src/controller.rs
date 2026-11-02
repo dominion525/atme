@@ -169,6 +169,34 @@ impl State {
     }
 }
 
+/// メニューバーに出す絵
+#[derive(Debug, PartialEq)]
+pub enum Icon {
+    /// 取得中の回る絵の、何枚目か
+    Turning(usize),
+    /// いつもの絵
+    Idle,
+    /// 絵が読めなかったときの、文字だけの表示
+    Text,
+}
+
+/// メニューバーに出す絵と文。turning は回る絵の枚数、has_idle はいつもの絵を読めたか、badge は未読の件数（無ければ空）。
+/// 絵が読めなかったときは、文字の「@」に件数を続けて、atme だと分かるようにする
+pub fn icon(state: &State, turning: usize, has_idle: bool, badge: &str) -> (Icon, String) {
+    let icon = if state.animating && turning > 0 {
+        Icon::Turning(state.frame % turning)
+    } else if has_idle {
+        Icon::Idle
+    } else {
+        Icon::Text
+    };
+    let title = match icon {
+        Icon::Text => format!("@ {badge}").trim_end().to_owned(),
+        _ => badge.to_owned(),
+    };
+    (icon, title)
+}
+
 /// 次に出す絵の番号。止める途中なら、縦に戻る絵（0 番）まで回ったところで None を返して止める
 fn advance(frame: usize, frames: usize, stopping: bool) -> Option<usize> {
     if frames == 0 {
@@ -282,6 +310,30 @@ mod tests {
 
     fn now() -> Instant {
         Instant::now()
+    }
+
+    #[test]
+    fn icon_turns_while_fetching_and_shows_the_count() {
+        let mut state = State::default();
+        assert_eq!(icon(&state, 12, true, "3"), (Icon::Idle, "3".into()));
+        assert_eq!(icon(&state, 12, true, ""), (Icon::Idle, String::new()));
+
+        state.phase_changed(Phase::Fetching, now());
+        state.tick(12);
+        state.tick(12);
+        assert_eq!(icon(&state, 12, true, "3"), (Icon::Turning(2), "3".into()));
+    }
+
+    #[test]
+    fn icon_falls_back_to_text_without_images() {
+        // .app の資源が欠けて絵を読めないときも、atme だと分かるように「@」を出す
+        let mut state = State::default();
+        assert_eq!(icon(&state, 0, false, "3"), (Icon::Text, "@ 3".into()));
+        assert_eq!(icon(&state, 0, false, ""), (Icon::Text, "@".into()));
+
+        // 回る絵が無ければ、取得中でもいつもの絵のまま
+        state.phase_changed(Phase::Fetching, now());
+        assert_eq!(icon(&state, 0, true, "3"), (Icon::Idle, "3".into()));
     }
 
     #[test]

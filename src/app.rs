@@ -429,16 +429,19 @@ fn update_icon(ui: &Ui, mtm: MainThreadMarker) {
     let Some(button) = ui.status_item.button(mtm) else {
         return;
     };
-    let image = match (ui.state.animating, ui.icons.loading.is_empty()) {
-        (true, false) => Some(&ui.icons.loading[ui.state.frame % ui.icons.loading.len()]),
-        _ => ui.icons.idle.as_ref(),
+    let (icon, title) = controller::icon(
+        &ui.state,
+        ui.icons.loading.len(),
+        ui.icons.idle.is_some(),
+        &ui.badge,
+    );
+    let image = match icon {
+        controller::Icon::Turning(frame) => Some(&ui.icons.loading[frame]),
+        controller::Icon::Idle => ui.icons.idle.as_ref(),
+        controller::Icon::Text => None,
     };
     button.setImage(image.map(|image| &**image));
-    let title = match image {
-        Some(_) => ui.badge.clone(),
-        None => format!("@ {}", ui.badge),
-    };
-    button.setTitle(&NSString::from_str(title.trim_end()));
+    button.setTitle(&NSString::from_str(&title));
 }
 
 /// キャッシュと記録を読み直して、メニューとメニューバーの件数を作り直す
