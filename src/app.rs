@@ -13,7 +13,7 @@ use objc2::rc::{Allocated, Retained};
 use objc2::runtime::{AnyClass, AnyObject, Bool, ProtocolObject};
 use objc2::{define_class, msg_send, sel, AnyThread, MainThreadOnly};
 use objc2_app_kit::{
-    NSAlertFirstButtonReturn, NSAlertSecondButtonReturn, NSApplication, NSButton,
+    NSApplication, NSButton,
     NSCellImagePosition, NSImage, NSMenu, NSMenuDelegate, NSMenuItem, NSModalResponse,
     NSSecureTextField, NSStatusBar, NSStatusItem, NSUserInterfaceItemIdentification,
     NSVariableStatusItemLength, NSWindow, NSWorkspace, NSWorkspaceDidWakeNotification,
@@ -275,7 +275,7 @@ define_class!(
             };
             match window.attachedSheet() {
                 // 確認のシートが出ているときは、シートを「キャンセル」（最初のボタン）で閉じる
-                Some(sheet) => window.endSheet_returnCode(&sheet, NSAlertFirstButtonReturn),
+                Some(sheet) => window.endSheet_returnCode(&sheet, ui::REMOVAL_CANCEL),
                 None if window.isKeyWindow() => window.performClose(None),
                 None => {}
             }
@@ -510,7 +510,7 @@ fn confirm_removal(name: String) {
     let shown = Store::open().map_or_else(|_| name.clone(), |store| controller::shown_name(&store, &name));
     let alert = ui::removal_alert(&shown, &target, mtm);
     let handler = RcBlock::new(move |response: NSModalResponse| {
-        if response == NSAlertSecondButtonReturn {
+        if ui::removal_confirmed(response) {
             let result = setup::remove(&name).map_err(|error| format!("{error:#}"));
             handle(|state| state.removed(result));
         }

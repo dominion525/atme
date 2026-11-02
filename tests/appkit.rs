@@ -9,7 +9,7 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Sel};
 use objc2::sel;
 use objc2_app_kit::{
-    NSApplication, NSButton, NSColor, NSControlStateValueOff, NSControlStateValueOn,
+    NSAlertFirstButtonReturn, NSApplication, NSButton, NSColor, NSControlStateValueOff, NSControlStateValueOn,
     NSEventModifierFlags, NSMenu, NSMenuItem, NSTextField, NSUserInterfaceItemIdentification,
     NSView, NSWindowStyleMask,
 };
@@ -27,6 +27,7 @@ fn main() {
         ("other_items_go_to_the_target", other_items_go_to_the_target),
         ("main_menu_has_paste_and_close", main_menu_has_paste_and_close),
         ("removal_alert_defaults_to_cancel", removal_alert_defaults_to_cancel),
+        ("only_the_remove_button_removes", only_the_remove_button_removes),
         ("window_without_workspaces", window_without_workspaces),
         ("window_lists_workspaces_with_remove", window_lists_workspaces_with_remove),
         ("window_locks_input_while_adding", window_locks_input_while_adding),
@@ -205,6 +206,23 @@ fn removal_alert_defaults_to_cancel(mtm: MainThreadMarker) {
         .and_then(|view| view.downcast::<NSButton>().ok())
         .expect("Esc のボタンが無い");
     assert_escape(&escape, &target);
+}
+
+/// シートの実際のボタンから、押したときの応答を読み直して、消すのは「削除」のボタンだけで、閉じるときの応答は「キャンセル」と同じであることを確かめる
+fn only_the_remove_button_removes(mtm: MainThreadMarker) {
+    let target = target();
+    let alert = ui::removal_alert("Acme", &target, mtm);
+    let buttons = alert.buttons();
+
+    for (index, button) in buttons.iter().enumerate() {
+        // NSAlert は、i 番目に足したボタンの応答を NSAlertFirstButtonReturn + i にする
+        let response = NSAlertFirstButtonReturn + index as isize;
+        let title = button.title().to_string();
+        assert_eq!(ui::removal_confirmed(response), title == "Remove", "{title}");
+    }
+    let cancel = (ui::REMOVAL_CANCEL - NSAlertFirstButtonReturn) as usize;
+    assert_eq!(buttons.objectAtIndex(cancel).title().to_string(), "Cancel");
+    assert!(!ui::removal_confirmed(ui::REMOVAL_CANCEL));
 }
 
 fn assert_escape(button: &NSButton, target: &AnyObject) {

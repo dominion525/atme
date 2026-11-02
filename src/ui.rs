@@ -4,7 +4,7 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Sel};
 use objc2::{sel, MainThreadOnly, Message};
 use objc2_app_kit::{
-    NSAlert, NSAlertStyle, NSBackingStoreType, NSBox, NSBoxType, NSButton, NSColor,
+    NSAlert, NSAlertFirstButtonReturn, NSAlertSecondButtonReturn, NSAlertStyle, NSModalResponse, NSBackingStoreType, NSBox, NSBoxType, NSButton, NSColor,
     NSControlStateValueOn, NSMenu, NSMenuItem, NSSecureTextField, NSTextField,
     NSUserInterfaceItemIdentification, NSView, NSWindow, NSWindowStyleMask,
 };
@@ -177,6 +177,14 @@ pub fn main_menu(target: &AnyObject, mtm: MainThreadMarker) -> Retained<NSMenu> 
     edit_item.setSubmenu(Some(&edit));
     main.addItem(&edit_item);
     main
+}
+
+/// 確認のシートを ⌘W や Esc で閉じるときの応答（「キャンセル」のボタンと同じ）
+pub const REMOVAL_CANCEL: NSModalResponse = NSAlertFirstButtonReturn;
+
+/// 確認のシートの応答が「削除」のボタンのものか。removal_alert のボタンの並び（キャンセル、削除）と対にする
+pub fn removal_confirmed(response: NSModalResponse) -> bool {
+    response == NSAlertSecondButtonReturn
 }
 
 /// 「削除」を押したときに出す確認のシート。最初のボタンが「キャンセル」、2 番目が「削除」。
