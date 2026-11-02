@@ -252,6 +252,25 @@ mod tests {
     }
 
     #[test]
+    fn keys_list_every_string_constant() {
+        // 文言の定数を足して KEYS に入れ忘れると、訳の抜けの検査をすり抜けるので、ソースから定数を拾って比べる
+        let source = include_str!("l10n.rs");
+        // 長い文言は整形で「=」のあとに改行が入るので、行ではなく「pub const」から「;」までを 1 つとして読む
+        let constants: std::collections::BTreeSet<&str> = source
+            .split("\npub const ")
+            .skip(1)
+            .filter_map(|declaration| declaration.split_once(';'))
+            .filter_map(|(declaration, _)| declaration.split_once(": &str ="))
+            .filter_map(|(_, value)| value.trim().strip_prefix('"')?.strip_suffix('"'))
+            .collect();
+        let keys: std::collections::BTreeSet<&str> = KEYS.iter().copied().collect();
+
+        assert!(constants.len() > 50, "{}", constants.len());
+        assert_eq!(constants, keys);
+        assert_eq!(KEYS.len(), keys.len(), "KEYS に同じものが 2 回入っている");
+    }
+
+    #[test]
     fn has_every_slack_language() {
         assert_eq!(
             languages(),
