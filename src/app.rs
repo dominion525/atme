@@ -1,3 +1,5 @@
+//! 常駐のアプリ。AppKit の出来事を受けて controller に渡し、返ってきた「するべきこと」を AppKit で行うだけにする。
+//! 判断は controller に、部品の形は ui に置く
 use std::cell::RefCell;
 use std::ptr::NonNull;
 use std::sync::mpsc::Sender;
@@ -9,7 +11,7 @@ use chrono::Local;
 use dispatch2::DispatchQueue;
 use objc2::rc::{Allocated, Retained};
 use objc2::runtime::{AnyClass, AnyObject, Bool, ProtocolObject};
-use objc2::{define_class, msg_send, sel, AnyThread, DefinedClass, MainThreadOnly};
+use objc2::{define_class, msg_send, sel, AnyThread, MainThreadOnly};
 use objc2_app_kit::{
     NSAlertFirstButtonReturn, NSAlertSecondButtonReturn, NSApplication, NSButton,
     NSCellImagePosition, NSImage, NSMenu, NSMenuDelegate, NSMenuItem, NSModalResponse,
@@ -26,47 +28,39 @@ use objc2_user_notifications::{
     UNUserNotificationCenterDelegate,
 };
 
-use crate::config::Config;
-use crate::dismiss;
+use crate::config;
+use crate::controller::{self, Effect, FETCH_MIN_GAP};
 use crate::fetch;
 use crate::l10n;
 use crate::login::{self, LoginState};
 use crate::manifest;
-use crate::menu::{self, Menu};
+use crate::menu;
 use crate::notify::PERMALINK_KEY;
-use crate::scheduler::{self, Phase};
+use crate::scheduler;
 use crate::setup;
-use crate::state::{Cache, SeenKey, Store};
+use crate::state::Store;
+use crate::ui;
 
 const FETCH_INTERVAL: Duration = Duration::from_secs(300);
 // 取得中の絵を差し替える間隔（秒）。12 枚で 1 周およそ 0.6 秒
 const ANIMATION_INTERVAL: f64 = 0.05;
-// search.messages の呼び出し回数の上限に届かないよう、続けて取得するときはこれだけ空ける
-const FETCH_MIN_GAP: Duration = Duration::from_secs(30);
 
+/// 常駐のあいだ持っておく AppKit の部品と、controller の状態
 struct Ui {
+    state: controller::State,
     status_item: Retained<NSStatusItem>,
     target: Retained<MenuTarget>,
     menu: Retained<NSMenu>,
-    failures: Vec<String>,
-    phase: Phase,
-    /// 最後に取得が終わった時刻。「今すぐ取得（あと N 秒）」に使う
-    last_fetched: Option<Instant>,
+    /// 取得を頼む先（scheduler）
+    trigger: Sender<()>,
     badge: String,
     icons: Icons,
-    frame: usize,
     animation: Option<Retained<NSTimer>>,
-    /// 取得が終わり、縦に戻る絵まで回してから止めるところ
-    stopping: bool,
     /// Sparkle の SPUStandardUpdaterController。読み込めなかったときは None
     updater: Option<Retained<AnyObject>>,
     /// ワークスペースの追加・削除のウインドウ。1 度開いたら閉じても持っておく
     window: Option<Retained<NSWindow>>,
     token_field: Option<Retained<NSSecureTextField>>,
-    /// ウインドウの下に出す、確認中・追加できた・失敗の文
-    setup_status: crate::ui::Status,
-    /// token を確かめているあいだは「追加」を押せなくする
-    adding: bool,
 }
 
 /// メニューバーの絵。atme.app の Resources から読む。読めなければ文字の @ で代わりにする
@@ -94,8 +88,67 @@ fn load_icon(name: &str) -> Option<Retained<NSImage>> {
 }
 
 thread_local! {
-    // メインスレッドだけが触る。取得のスレッドからは DispatchQueue::main 経由で refresh を呼ぶ
+    // メインスレッドだけが触る。取得のスレッドからは DispatchQueue::main 経由で渡す
     static UI: RefCell<Option<Ui>> = const { RefCell::new(None) };
+}
+
+/// controller の状態を更新し、返ってきた「するべきこと」を行う。UI を借りたまま行わないよう、更新と実行を分ける
+fn handle(update: impl FnOnce(&mut controller::State) -> Vec<Effect>) {
+    let effects = UI.with(|ui| {
+        ui.borrow_mut()
+            .as_mut()
+            .map(|ui| update(&mut ui.state))
+            .unwrap_or_default()
+    });
+    for effect in effects {
+        apply(effect);
+    }
+}
+
+fn apply(effect: Effect) {
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    match effect {
+        Effect::RefreshMenu => refresh(),
+        Effect::RedrawIcon => UI.with(|ui| {
+            if let Some(ui) = ui.borrow().as_ref() {
+                update_icon(ui, mtm);
+            }
+        }),
+        Effect::StartAnimation => {
+            let timer = start_animation();
+            UI.with(|ui| {
+                if let Some(ui) = ui.borrow_mut().as_mut() {
+                    ui.animation = Some(timer);
+                }
+            });
+        }
+        Effect::StopAnimation => UI.with(|ui| {
+            if let Some(animation) = ui.borrow_mut().as_mut().and_then(|ui| ui.animation.take()) {
+                animation.invalidate();
+            }
+        }),
+        Effect::ShowWorkspaces => show_workspaces(),
+        Effect::ClearTokenField => UI.with(|ui| {
+            if let Some(field) = ui.borrow().as_ref().and_then(|ui| ui.token_field.as_ref()) {
+                field.setStringValue(ns_string!(""));
+            }
+        }),
+        // auth.test は通信するので、メインスレッドを止めないよう別のスレッドで確かめる
+        Effect::CheckToken(token) => {
+            std::thread::spawn(move || {
+                let result = setup::add(&token).map_err(|error| format!("{error:#}"));
+                DispatchQueue::main()
+                    .exec_async(move || handle(|state| state.token_checked(result)));
+            });
+        }
+        Effect::Fetch => UI.with(|ui| {
+            if let Some(ui) = ui.borrow().as_ref() {
+                let _ = ui.trigger.send(());
+            }
+        }),
+    }
 }
 
 define_class!(
@@ -136,18 +189,17 @@ define_class!(
     #[unsafe(super = NSObject)]
     #[thread_kind = MainThreadOnly]
     #[name = "AtmeMenuTarget"]
-    #[ivars = Sender<()>]
     struct MenuTarget;
 
     impl MenuTarget {
         #[unsafe(method(fetchNow:))]
         fn fetch_now(&self, _sender: &NSMenuItem) {
-            let _ = self.ivars().send(());
+            apply(Effect::Fetch);
         }
 
         #[unsafe(method(didWake:))]
         fn did_wake(&self, _notification: &NSNotification) {
-            let _ = self.ivars().send(());
+            apply(Effect::Fetch);
         }
 
         #[unsafe(method(openPermalink:))]
@@ -159,7 +211,9 @@ define_class!(
 
         #[unsafe(method(dismissAll:))]
         fn dismiss_all(&self, _sender: &NSMenuItem) {
-            dismiss_with(dismiss::all_keys);
+            if let Ok(store) = Store::open() {
+                controller::dismiss_all(&store);
+            }
             refresh();
         }
 
@@ -174,17 +228,13 @@ define_class!(
                     Ok(())
                 }
             };
-            if let Err(error) = result {
-                UI.with(|ui| {
-                    if let Some(ui) = ui.borrow_mut().as_mut() {
-                        ui.failures.push(l10n::format(
-                            l10n::LOGIN_TOGGLE_FAILED,
-                            &[&error.localizedDescription().to_string()],
-                        ));
-                    }
-                });
+            match result {
+                Ok(()) => refresh(),
+                Err(error) => {
+                    let message = error.localizedDescription().to_string();
+                    handle(|state| state.login_toggle_failed(&message));
+                }
             }
-            refresh();
         }
 
         #[unsafe(method(openWorkspaces:))]
@@ -195,60 +245,26 @@ define_class!(
         #[unsafe(method(addWorkspace:))]
         fn add_workspace(&self, _sender: &AnyObject) {
             let token = UI.with(|ui| {
-                let mut ui = ui.borrow_mut();
-                let ui = ui.as_mut()?;
-                let token = ui.token_field.as_ref()?.stringValue().to_string();
-                if ui.adding || token.trim().is_empty() {
-                    return None;
-                }
-                ui.adding = true;
-                ui.setup_status = crate::ui::Status::Info(l10n::text(l10n::CHECKING));
-                Some(token)
+                ui.borrow()
+                    .as_ref()
+                    .and_then(|ui| ui.token_field.as_ref())
+                    .map(|field| field.stringValue().to_string())
             });
-            let Some(token) = token else {
-                return;
-            };
-            show_workspaces();
-            // auth.test は通信するので、メインスレッドを止めないよう別のスレッドで確かめる
-            let trigger = self.ivars().clone();
-            std::thread::spawn(move || {
-                let result = setup::add(&token).map_err(|error| format!("{error:#}"));
-                DispatchQueue::main().exec_async(move || {
-                    let added = result.is_ok();
-                    UI.with(|ui| {
-                        if let Some(ui) = ui.borrow_mut().as_mut() {
-                            ui.adding = false;
-                            ui.setup_status = match &result {
-                                Ok(team) => crate::ui::Status::Info(l10n::format(l10n::ADDED, &[team])),
-                                Err(error) => crate::ui::Status::Error(error.clone()),
-                            };
-                            if let (true, Some(field)) = (added, &ui.token_field) {
-                                field.setStringValue(ns_string!(""));
-                            }
-                        }
-                    });
-                    show_workspaces();
-                    if added {
-                        let _ = trigger.send(());
-                    }
-                });
-            });
+            if let Some(token) = token {
+                handle(|state| state.add_pressed(&token));
+            }
         }
 
         #[unsafe(method(removeWorkspace:))]
         fn remove_workspace(&self, sender: &NSButton) {
-            let Some(name) = sender.identifier().map(|name| name.to_string()) else {
-                return;
-            };
-            confirm_removal(name, self.ivars().clone());
+            if let Some(name) = sender.identifier().map(|name| name.to_string()) {
+                confirm_removal(name);
+            }
         }
 
         #[unsafe(method(createSlackApp:))]
         fn create_slack_app(&self, _sender: &AnyObject) {
-            let url = manifest::create_app_url();
-            if let Some(url) = NSURL::URLWithString(&NSString::from_str(url.as_str())) {
-                NSWorkspace::sharedWorkspace().openURL(&url);
-            }
+            open_url(manifest::create_app_url().as_str());
         }
 
         #[unsafe(method(closeWorkspaces:))]
@@ -283,8 +299,8 @@ define_class!(
 );
 
 impl MenuTarget {
-    fn new(mtm: MainThreadMarker, trigger: Sender<()>) -> Retained<Self> {
-        let this = Self::alloc(mtm).set_ivars(trigger);
+    fn new(mtm: MainThreadMarker) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(());
         unsafe { msg_send![super(this), init] }
     }
 }
@@ -341,13 +357,16 @@ pub fn run() -> Result<()> {
             FETCH_MIN_GAP,
             || {
                 let failures = menu::failure_lines(&fetch::fetch_once());
-                DispatchQueue::main().exec_async(move || on_fetched(failures));
+                DispatchQueue::main().exec_async(move || handle(|state| state.fetched(failures)));
             },
-            |phase| DispatchQueue::main().exec_async(move || on_phase(phase)),
+            |phase| {
+                DispatchQueue::main()
+                    .exec_async(move || handle(|state| state.phase_changed(phase, Instant::now())))
+            },
         );
         (trigger, Some(worker))
     };
-    let target = MenuTarget::new(mtm, trigger);
+    let target = MenuTarget::new(mtm);
     let observer: &AnyObject = &target;
     unsafe {
         NSWorkspace::sharedWorkspace()
@@ -369,31 +388,24 @@ pub fn run() -> Result<()> {
     menu.setAutoenablesItems(false);
     menu.setDelegate(Some(ProtocolObject::from_ref(&*target)));
     status_item.setMenu(Some(&menu));
-    let menu_target: &AnyObject = &target;
-    app.setMainMenu(Some(&crate::ui::main_menu(menu_target, mtm)));
+    app.setMainMenu(Some(&ui::main_menu(observer, mtm)));
     UI.with(|ui| {
         *ui.borrow_mut() = Some(Ui {
+            state: controller::State::default(),
             status_item,
             target,
             menu,
-            failures: Vec::new(),
-            phase: Phase::Idle,
-            last_fetched: None,
+            trigger,
             badge: String::new(),
             icons: Icons::load(),
-            frame: 0,
             animation: None,
-            stopping: false,
             updater: start_updater(),
             window: None,
             token_field: None,
-            setup_status: crate::ui::Status::None,
-            adding: false,
         })
     });
     refresh();
-    // 初めて起動したとき（ワークスペースが 1 つも無いとき）は、追加のウインドウを開く
-    if Config::load().map_or(true, |config| config.workspace.is_empty()) {
+    if config::path().map_or(true, |path| controller::needs_first_workspace(&path)) {
         open_workspaces();
     }
 
@@ -401,47 +413,11 @@ pub fn run() -> Result<()> {
     Ok(())
 }
 
-fn on_phase(phase: Phase) {
-    UI.with(|ui| {
-        if let Some(ui) = ui.borrow_mut().as_mut() {
-            if ui.phase == Phase::Fetching && phase != Phase::Fetching {
-                ui.last_fetched = Some(Instant::now());
-            }
-            ui.phase = phase;
-            if phase == Phase::Fetching {
-                ui.stopping = false;
-                if ui.animation.is_none() {
-                    ui.animation = Some(start_animation());
-                }
-            } else if ui.animation.is_some() {
-                ui.stopping = true;
-            }
-        }
-    });
-    refresh();
-}
-
-/// 取得中の絵を ANIMATION_INTERVAL ごとに差し替えるタイマー。メニューを開いているあいだも動くよう common モードに入れる
+/// 取得中の絵を ANIMATION_INTERVAL ごとに進めるタイマー。メニューを開いているあいだも動くよう common モードに入れる
 fn start_animation() -> Retained<NSTimer> {
     let tick = RcBlock::new(|_timer: NonNull<NSTimer>| {
-        let Some(mtm) = MainThreadMarker::new() else {
-            return;
-        };
-        UI.with(|ui| {
-            if let Some(ui) = ui.borrow_mut().as_mut() {
-                match advance(ui.frame, ui.icons.loading.len(), ui.stopping) {
-                    Some(next) => ui.frame = next,
-                    None => {
-                        if let Some(animation) = ui.animation.take() {
-                            animation.invalidate();
-                        }
-                        ui.frame = 0;
-                        ui.stopping = false;
-                    }
-                }
-                update_icon(ui, mtm);
-            }
-        });
+        let frames = UI.with(|ui| ui.borrow().as_ref().map_or(0, |ui| ui.icons.loading.len()));
+        handle(|state| state.tick(frames));
     });
     let timer =
         unsafe { NSTimer::timerWithTimeInterval_repeats_block(ANIMATION_INTERVAL, true, &tick) };
@@ -449,21 +425,12 @@ fn start_animation() -> Retained<NSTimer> {
     timer
 }
 
-/// 次に出す絵の番号。止める途中なら、縦に戻る絵（0 番）まで回ったところで None を返して止める
-fn advance(frame: usize, frames: usize, stopping: bool) -> Option<usize> {
-    if frames == 0 {
-        return None;
-    }
-    let next = (frame + 1) % frames;
-    (!(stopping && next == 0)).then_some(next)
-}
-
 fn update_icon(ui: &Ui, mtm: MainThreadMarker) {
     let Some(button) = ui.status_item.button(mtm) else {
         return;
     };
-    let image = match (ui.animation.is_some(), ui.icons.loading.is_empty()) {
-        (true, false) => Some(&ui.icons.loading[ui.frame % ui.icons.loading.len()]),
+    let image = match (ui.state.animating, ui.icons.loading.is_empty()) {
+        (true, false) => Some(&ui.icons.loading[ui.state.frame % ui.icons.loading.len()]),
         _ => ui.icons.idle.as_ref(),
     };
     button.setImage(image.map(|image| &**image));
@@ -474,152 +441,81 @@ fn update_icon(ui: &Ui, mtm: MainThreadMarker) {
     button.setTitle(&NSString::from_str(title.trim_end()));
 }
 
-fn on_fetched(failures: Vec<String>) {
-    UI.with(|ui| {
-        if let Some(ui) = ui.borrow_mut().as_mut() {
-            ui.failures = failures;
-        }
-    });
-    refresh();
-}
-
-/// キャッシュと記録を読み直してメニューを作り直す。キャッシュから消えた分の記録はここで捨てる
+/// キャッシュと記録を読み直して、メニューとメニューバーの件数を作り直す
 fn refresh() {
     let Some(mtm) = MainThreadMarker::new() else {
         return;
     };
-    let store = Store::open().ok();
-    let cache = store
-        .as_ref()
-        .and_then(|store| store.load_cache().ok().flatten());
-    let users = store
-        .as_ref()
-        .and_then(|store| store.load_users().ok().flatten())
-        .unwrap_or_default();
-    let mut dismissed = store
-        .as_ref()
-        .and_then(|store| store.load_dismissed().ok().flatten())
-        .unwrap_or_default();
-    if let (Some(store), Some(cache)) = (store.as_ref(), cache.as_ref()) {
-        let pruned = dismiss::prune(&dismissed, cache);
-        if pruned != dismissed {
-            if let Err(error) = store.save_dismissed(&pruned) {
-                eprintln!("{error:#}");
-            }
-            dismissed = pruned;
-        }
-    }
-    let workspaces: Vec<String> = Config::load()
-        .map(|config| {
-            config
-                .workspace
-                .into_iter()
-                .map(|workspace| workspace.name)
-                .collect()
-        })
-        .unwrap_or_default();
+    let data = match (Store::open(), config::path()) {
+        (Ok(store), Ok(path)) => controller::menu_data(&store, &path),
+        _ => controller::MenuData::default(),
+    };
+    let login = login_state();
     UI.with(|ui| {
-        if let Some(ui) = ui.borrow_mut().as_mut() {
-            let model = menu::build(
-                &menu::Inputs {
-                    cache: cache.as_ref(),
-                    users: &users,
-                    failures: &ui.failures,
-                    dismissed: &dismissed,
-                    login: login_state(),
-                    updates: ui.updater.is_some(),
-                    fetch: menu::fetch_button(
-                        ui.phase,
-                        ui.last_fetched.map(|finished| finished.elapsed()),
-                        FETCH_MIN_GAP,
-                    ),
-                    workspaces: &workspaces,
-                },
-                &Local,
-            );
-            show(ui, &model, mtm);
+        let mut ui = ui.borrow_mut();
+        let Some(ui) = ui.as_mut() else {
+            return;
+        };
+        let model = menu::build(
+            &menu::Inputs {
+                cache: data.cache.as_ref(),
+                users: &data.users,
+                failures: &ui.state.failures,
+                dismissed: &data.dismissed,
+                login,
+                updates: ui.updater.is_some(),
+                fetch: ui.state.fetch_button(Instant::now()),
+                workspaces: &data.workspaces,
+            },
+            &Local,
+        );
+        ui.badge = model.badge.clone();
+        update_icon(ui, mtm);
+        ui.menu.removeAllItems();
+        let target: &AnyObject = &ui.target;
+        for entry in &model.entries {
+            ui.menu
+                .addItem(&ui::menu_item(entry, target, ui.updater.as_deref(), mtm));
         }
     });
 }
 
-fn open_and_dismiss(permalink: &str) {
-    if let Some(url) = NSURL::URLWithString(&NSString::from_str(permalink)) {
+fn open_url(url: &str) {
+    if let Some(url) = NSURL::URLWithString(&NSString::from_str(url)) {
         NSWorkspace::sharedWorkspace().openURL(&url);
     }
-    dismiss_with(|cache| {
-        dismiss::key_for_permalink(cache, permalink)
-            .into_iter()
-            .collect()
-    });
+}
+
+/// メッセージを Slack で開き、atme の一覧から外す
+fn open_and_dismiss(permalink: &str) {
+    open_url(permalink);
+    if let Ok(store) = Store::open() {
+        controller::dismiss_permalink(&store, permalink);
+    }
     refresh();
 }
 
-/// 選んだ項目を記録に足して保存する。メインスレッドからだけ呼ぶ
-fn dismiss_with(select: impl FnOnce(&Cache) -> Vec<SeenKey>) {
-    let Ok(store) = Store::open() else {
-        return;
-    };
-    let Some(cache) = store.load_cache().ok().flatten() else {
-        return;
-    };
-    let mut dismissed = store.load_dismissed().ok().flatten().unwrap_or_default();
-    dismissed.extend(select(&cache));
-    if let Err(error) = store.save_dismissed(&dismiss::prune(&dismissed, &cache)) {
-        eprintln!("{error:#}");
-    }
-}
-
-fn show(ui: &mut Ui, model: &Menu, mtm: MainThreadMarker) {
-    ui.badge = model.badge.clone();
-    update_icon(ui, mtm);
-    ui.menu.removeAllItems();
-    let target: &AnyObject = &ui.target;
-    for entry in &model.entries {
-        ui.menu
-            .addItem(&crate::ui::menu_item(entry, target, ui.updater.as_deref(), mtm));
-    }
-}
-
-
-/// 「削除」を押したときに、ワークスペースのウインドウに確認のシートを出す。
-/// 「削除」を選んだときだけ外す。既定のボタン（Return）は「キャンセル」。⌘W と Esc もキャンセルになる（closeWorkspaces:）
-fn confirm_removal(name: String, trigger: Sender<()>) {
+/// 「削除」を押したときに、ワークスペースのウインドウに確認のシートを出し、「削除」を選んだときだけ外す
+fn confirm_removal(name: String) {
     let Some(mtm) = MainThreadMarker::new() else {
         return;
     };
-    let Some(window) = UI.with(|ui| ui.borrow().as_ref().and_then(|ui| ui.window.clone())) else {
+    let Some((window, target)) = UI.with(|ui| {
+        ui.borrow()
+            .as_ref()
+            .and_then(|ui| Some((ui.window.clone()?, ui.target.clone())))
+    }) else {
         return;
     };
-    let shown = Store::open()
-        .ok()
-        .and_then(|store| store.load_cache().ok().flatten())
-        .and_then(|cache| cache.teams.get(&name).cloned())
-        .unwrap_or_else(|| name.clone());
-    let Some(target) = UI.with(|ui| ui.borrow().as_ref().map(|ui| ui.target.clone())) else {
-        return;
-    };
-    let alert = crate::ui::removal_alert(&shown, &target, mtm);
+    let shown = Store::open().map_or_else(|_| name.clone(), |store| controller::shown_name(&store, &name));
+    let alert = ui::removal_alert(&shown, &target, mtm);
     let handler = RcBlock::new(move |response: NSModalResponse| {
         if response == NSAlertSecondButtonReturn {
-            remove_now(&name, &trigger);
+            let result = setup::remove(&name).map_err(|error| format!("{error:#}"));
+            handle(|state| state.removed(result));
         }
     });
     alert.beginSheetModalForWindow_completionHandler(&window, Some(&handler));
-}
-
-/// 設定ファイルと Keychain から外し、ウインドウを作り直して取得し直す
-fn remove_now(name: &str, trigger: &Sender<()>) {
-    let status = match setup::remove(name) {
-        Ok(()) => crate::ui::Status::None,
-        Err(error) => crate::ui::Status::Error(format!("{error:#}")),
-    };
-    UI.with(|ui| {
-        if let Some(ui) = ui.borrow_mut().as_mut() {
-            ui.setup_status = status;
-        }
-    });
-    show_workspaces();
-    let _ = trigger.send(());
 }
 
 /// ワークスペースのウインドウを開いて前に出す
@@ -637,29 +533,15 @@ fn open_workspaces() {
     NSApplication::sharedApplication(mtm).activateIgnoringOtherApps(true);
 }
 
-/// ワークスペースのウインドウの中身を、今の設定から作り直す。まだ開いていなければ作る
+/// ワークスペースのウインドウの中身を、今の設定と状態から作り直す。まだ開いていなければ作る
 fn show_workspaces() {
     let Some(mtm) = MainThreadMarker::new() else {
         return;
     };
-    let teams = Store::open()
-        .ok()
-        .and_then(|store| store.load_cache().ok().flatten())
-        .map(|cache| cache.teams)
-        .unwrap_or_default();
-    // 設定の name は内部の名前なので、Slack 上の名前が分かればそちらだけを出す
-    let workspaces: Vec<crate::ui::ShownWorkspace> = Config::load()
-        .map(|config| {
-            config
-                .workspace
-                .into_iter()
-                .map(|workspace| crate::ui::ShownWorkspace {
-                    shown: teams.get(&workspace.name).unwrap_or(&workspace.name).clone(),
-                    name: workspace.name,
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    let workspaces = match (Store::open(), config::path()) {
+        (Ok(store), Ok(path)) => controller::shown_workspaces(&store, &path),
+        _ => Vec::new(),
+    };
     UI.with(|ui| {
         let mut ui = ui.borrow_mut();
         let Some(ui) = ui.as_mut() else {
@@ -667,23 +549,23 @@ fn show_workspaces() {
         };
         let field = ui
             .token_field
-            .get_or_insert_with(|| crate::ui::token_field(mtm))
+            .get_or_insert_with(|| ui::token_field(mtm))
             .clone();
         let target: &AnyObject = &ui.target;
-        let (content, height) = crate::ui::workspace_content(
+        let (content, height) = ui::workspace_content(
             &workspaces,
-            &ui.setup_status,
-            ui.adding,
+            &ui.state.setup_status,
+            ui.state.adding,
             &field,
             target,
             mtm,
         );
         let window = ui
             .window
-            .get_or_insert_with(|| crate::ui::workspace_window(height, mtm))
+            .get_or_insert_with(|| ui::workspace_window(height, mtm))
             .clone();
         window.setContentView(Some(&content));
-        window.setContentSize(NSSize::new(crate::ui::WINDOW_WIDTH, height));
+        window.setContentSize(NSSize::new(ui::WINDOW_WIDTH, height));
         window.center();
         window.makeFirstResponder(Some(&field));
     });
@@ -762,23 +644,5 @@ mod tests {
     #[test]
     fn tests_run_outside_app_bundle() {
         assert!(!in_app_bundle());
-    }
-
-    #[test]
-    fn keeps_rotating_while_fetching() {
-        assert_eq!(advance(0, 12, false), Some(1));
-        assert_eq!(advance(11, 12, false), Some(0));
-    }
-
-    #[test]
-    fn stops_only_when_back_upright() {
-        assert_eq!(advance(5, 12, true), Some(6));
-        assert_eq!(advance(10, 12, true), Some(11));
-        assert_eq!(advance(11, 12, true), None);
-    }
-
-    #[test]
-    fn stops_without_frames() {
-        assert_eq!(advance(0, 0, false), None);
     }
 }

@@ -1,6 +1,7 @@
 //! atme の処理。実行ファイル（main.rs）と、tests/ のテストの両方から使う
 pub mod app;
 pub mod config;
+pub mod controller;
 pub mod credentials;
 pub mod dismiss;
 pub mod display;
