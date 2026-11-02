@@ -567,6 +567,15 @@ mod flow_tests {
         server: &mut ServerGuard,
         general_last_read: &str,
     ) -> BTreeMap<&'static str, mockito::Mock> {
+        slack_for_home_with(server, general_last_read, &[])
+    }
+
+    /// slack_for_home と同じ。ただし missing の人の users.info は user_not_found を返す（退職した人など）
+    fn slack_for_home_with(
+        server: &mut ServerGuard,
+        general_last_read: &str,
+        missing: &[&str],
+    ) -> BTreeMap<&'static str, mockito::Mock> {
         let mut users = BTreeMap::new();
         respond(
             server,
@@ -580,7 +589,7 @@ mod flow_tests {
             &[("query", "<@U0ME> after:2026-10-25")],
             &format!(
                 r#"{{"ok":true,"messages":{{"paging":{{"pages":1}},"matches":[
-                    {{"channel":{{"id":"C1","name":"general"}},"user":"U1","ts":"{MENTION}","text":"<@U0ME> 確認をお願いします","permalink":"https://home.slack.com/archives/C1/p1"}}
+                    {{"channel":{{"id":"C1","name":"general"}},"user":"U1","username":"sato","ts":"{MENTION}","text":"<@U0ME> 確認をお願いします","permalink":"https://home.slack.com/archives/C1/p1"}}
                 ]}}}}"#
             ),
         );
@@ -595,12 +604,12 @@ mod flow_tests {
             ),
         );
         for (id, name) in [("U0ME", "鈴木"), ("U1", "佐藤"), ("U2", "田中")] {
-            let mock = respond(
-                server,
-                "users.info",
-                &[("user", id)],
-                &format!(r#"{{"ok":true,"user":{{"name":"{id}","profile":{{"display_name":"{name}"}}}}}}"#),
-            );
+            let body = if missing.contains(&id) {
+                r#"{"ok":false,"error":"user_not_found"}"#.to_owned()
+            } else {
+                format!(r#"{{"ok":true,"user":{{"name":"{id}","profile":{{"display_name":"{name}"}}}}}}"#)
+            };
+            let mock = respond(server, "users.info", &[("user", id)], &body);
             users.insert(id, mock);
         }
         respond(
@@ -703,6 +712,24 @@ mod flow_tests {
 
         assert!(world.notified.borrow().is_empty());
         assert_eq!(cached_ts(&world), [DM, MENTION]);
+    }
+
+    #[test]
+    fn a_name_that_cannot_be_looked_up_does_not_stop_the_fetch() {
+        // 佐藤さん（U1）は退職などで users.info が user_not_found を返す
+        let mut world = world(HOME);
+        slack_for_home_with(&mut world.server, "0.000000", &["U1"]);
+        world.env.store.save_seen(&Seen::new()).unwrap();
+
+        let reports = fetch_with(&world.env).unwrap();
+
+        assert_eq!(reports[0].result, Ok(Counts { total: 2, new: 2 }));
+        assert_eq!(*world.notified.borrow(), [DM, MENTION]);
+        let cache = world.env.store.load_cache().unwrap().unwrap();
+        let mention = cache.items.iter().find(|item| item.ts == MENTION).unwrap();
+        // 名前は、検索の結果に付いてくるハンドルで出す
+        assert_eq!(mention.user_name.as_deref(), Some("sato"));
+        assert!(!world.env.store.load_users().unwrap().unwrap()["home"].contains_key("U1"));
     }
 
     #[test]
