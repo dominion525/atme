@@ -325,6 +325,24 @@ mod tests {
         assert_eq!(names, ["home", "work"]);
     }
 
+    const COMMENTED: &str = "# 自分の設定\ndays = 3\n\n# 個人のワークスペース\n[[workspace]]\nname = \"home\"\n\n# 会社のワークスペース\n[[workspace]]\nname = \"work\" # 同期は平日だけ\n";
+
+    #[test]
+    fn removing_takes_the_comment_of_that_workspace_only() {
+        assert_eq!(
+            without_workspace(COMMENTED, "home").unwrap(),
+            "# 自分の設定\ndays = 3\n\n# 会社のワークスペース\n[[workspace]]\nname = \"work\" # 同期は平日だけ\n"
+        );
+    }
+
+    #[test]
+    fn adding_keeps_the_comments_of_every_workspace() {
+        assert_eq!(
+            with_workspace(COMMENTED, "new").unwrap(),
+            format!("{COMMENTED}\n[[workspace]]\nname = \"new\"\n")
+        );
+    }
+
     #[test]
     fn removing_keeps_the_rest_of_the_file() {
         let (_dir, path) = config_path();
