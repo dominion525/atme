@@ -98,13 +98,15 @@ mod tests {
 
     #[test]
     fn coalesces_triggers_sent_while_working() {
+        // 1 回目の取得は、テストが合図を送り終えるまで終わらせない（時間に頼らずに「取得中に届いた」形を作る）
         let (done, runs) = mpsc::channel();
+        let (release, gate) = mpsc::channel::<()>();
         let (trigger, _handle) = spawn(
             LONG,
             NO_GAP,
             move || {
                 done.send(()).unwrap();
-                thread::sleep(Duration::from_millis(100));
+                let _ = gate.recv_timeout(WAIT);
             },
             |_| {},
         );
@@ -113,6 +115,8 @@ mod tests {
         for _ in 0..3 {
             trigger.send(()).unwrap();
         }
+        // 送り手を手放すと、1 回目の取得の待ちが解け、2 回目からは待たない
+        drop(release);
         runs.recv_timeout(WAIT).unwrap();
         assert!(runs.recv_timeout(QUIET).is_err());
     }
@@ -140,13 +144,23 @@ mod tests {
 
     #[test]
     fn reports_phases() {
-        let gap = Duration::from_millis(100);
+        // 合図は 1 回目の取得が終わる前に送っておく。終わった直後に受け取るので、前回からの時間は必ず gap より短く、待ちを通る
+        let gap = Duration::from_millis(300);
         let (report, phases) = mpsc::channel();
-        let (trigger, _handle) = spawn(LONG, gap, || {}, move |phase| report.send(phase).unwrap());
+        let (release, gate) = mpsc::channel::<()>();
+        let (trigger, _handle) = spawn(
+            LONG,
+            gap,
+            move || {
+                let _ = gate.recv();
+            },
+            move |phase| report.send(phase).unwrap(),
+        );
 
+        trigger.send(()).unwrap();
+        drop(release);
         assert_eq!(phases.recv_timeout(WAIT).unwrap(), Phase::Fetching);
         assert_eq!(phases.recv_timeout(WAIT).unwrap(), Phase::Idle);
-        trigger.send(()).unwrap();
         assert_eq!(phases.recv_timeout(WAIT).unwrap(), Phase::Waiting);
         assert_eq!(phases.recv_timeout(WAIT).unwrap(), Phase::Fetching);
         assert_eq!(phases.recv_timeout(WAIT).unwrap(), Phase::Idle);
