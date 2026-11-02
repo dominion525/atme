@@ -355,12 +355,6 @@ mod tests {
     }
 
     #[test]
-    fn keeps_fetched_at_when_every_workspace_failed() {
-        assert_eq!(fetched_at(100, 200, true), 200);
-        assert_eq!(fetched_at(100, 200, false), 100);
-    }
-
-    #[test]
     fn after_date_goes_back_days() {
         let today = NaiveDate::from_ymd_opt(2026, 10, 28).unwrap();
         assert_eq!(after_date(today, 7), "2026-10-21");

@@ -49,10 +49,24 @@ mod tests {
         );
     }
 
+    /// 登録と解除の結果の状態（macOS が受け付けたとき）
+    fn after(action: Action) -> Option<LoginState> {
+        match action {
+            Action::Register => Some(LoginState::On),
+            Action::Unregister => Some(LoginState::Off),
+            Action::OpenSettings => None,
+        }
+    }
+
     #[test]
-    fn toggles_or_sends_to_settings() {
-        assert_eq!(action(LoginState::On), Action::Unregister);
-        assert_eq!(action(LoginState::Off), Action::Register);
+    fn choosing_the_item_turns_launch_at_login_the_other_way() {
+        assert_eq!(after(action(LoginState::Off)), Some(LoginState::On));
+        assert_eq!(after(action(LoginState::On)), Some(LoginState::Off));
+    }
+
+    #[test]
+    fn needs_approval_opens_settings_instead_of_registering_again() {
+        // システム設定でオフにされた項目は、登録し直しても承認されないので、設定を開いて任せる
         assert_eq!(action(LoginState::NeedsApproval), Action::OpenSettings);
     }
 }
