@@ -41,28 +41,79 @@ pub fn notify(items: &[Item], users: &Users, teams: &BTreeMap<String, String>) {
         eprintln!("{}", l10n::text(l10n::OUTSIDE_APP_NOTIFY));
         return;
     }
-    let center = UNUserNotificationCenter::currentNotificationCenter();
-    match authorization_status(&center) {
-        Some(status)
-            if status == UNAuthorizationStatus::Authorized
-                || status == UNAuthorizationStatus::Provisional => {}
-        Some(_) => {
-            eprintln!("{}", l10n::text(l10n::NOTIFICATIONS_NOT_ALLOWED_OPEN));
-            return;
+    match deliver(&SystemCenter::new(), &notifications) {
+        Ok(failures) => {
+            for failure in failures {
+                eprintln!("{}", l10n::format(l10n::NOTIFY_FAILED, &[&failure]));
+            }
         }
-        None => {
-            eprintln!("{}", l10n::text(l10n::NOTIFICATION_SETTINGS_UNREADABLE));
-            return;
+        Err(Refused::NotAllowed) => eprintln!("{}", l10n::text(l10n::NOTIFICATIONS_NOT_ALLOWED_OPEN)),
+        Err(Refused::SettingsUnreadable) => {
+            eprintln!("{}", l10n::text(l10n::NOTIFICATION_SETTINGS_UNREADABLE))
         }
     }
+}
+
+/// 通知を出す先に頼むこと。ふだんは macOS の通知センター（SystemCenter）、テストでは偽物
+trait Center {
+    /// 通知の許可の状態。読めなかったときは None
+    fn status(&self) -> Option<UNAuthorizationStatus>;
+    fn send(&self, notification: &Notification) -> Result<(), String>;
+    /// 次の通知を出すまで待つ
+    fn pause(&self);
+}
+
+#[derive(Debug, PartialEq)]
+enum Refused {
+    NotAllowed,
+    SettingsUnreadable,
+}
+
+/// 許可があれば、notifications を 1 件ずつ出す。出せなかったものの理由を返す（途中で失敗しても残りは出す）
+fn deliver(center: &impl Center, notifications: &[Notification]) -> Result<Vec<String>, Refused> {
+    match center.status() {
+        None => return Err(Refused::SettingsUnreadable),
+        Some(status) if !allows(status) => return Err(Refused::NotAllowed),
+        Some(_) => {}
+    }
+    let mut failures = Vec::new();
     for (index, notification) in notifications.iter().enumerate() {
         // 同時に出すとバナーが 1 つにまとめられるので、間隔をあけて 1 件ずつ出す
         if index > 0 {
-            thread::sleep(NOTIFY_INTERVAL);
+            center.pause();
         }
-        if let Err(error) = send(&center, notification) {
-            eprintln!("{}", l10n::format(l10n::NOTIFY_FAILED, &[&error.to_string()]));
+        if let Err(error) = center.send(notification) {
+            failures.push(error);
         }
+    }
+    Ok(failures)
+}
+
+/// 通知を出してよい許可の状態（許可済みと、仮の許可）
+fn allows(status: UNAuthorizationStatus) -> bool {
+    status == UNAuthorizationStatus::Authorized || status == UNAuthorizationStatus::Provisional
+}
+
+/// macOS の通知センター
+struct SystemCenter(Retained<UNUserNotificationCenter>);
+
+impl SystemCenter {
+    fn new() -> Self {
+        Self(UNUserNotificationCenter::currentNotificationCenter())
+    }
+}
+
+impl Center for SystemCenter {
+    fn status(&self) -> Option<UNAuthorizationStatus> {
+        authorization_status(&self.0)
+    }
+
+    fn send(&self, notification: &Notification) -> Result<(), String> {
+        send(&self.0, notification)
+    }
+
+    fn pause(&self) {
+        thread::sleep(NOTIFY_INTERVAL);
     }
 }
 
@@ -216,5 +267,114 @@ mod tests {
             planned[MAX_INDIVIDUAL].open,
             Some(items[0].permalink.clone())
         );
+    }
+}
+
+/// 通知センターを偽物にして、許可の扱いと、1 件ずつ出す流れを確かめる
+#[cfg(test)]
+mod delivery_tests {
+    use std::cell::RefCell;
+
+    use super::*;
+
+    /// 起きたことを順に記録する偽の通知センター。fail に入れた identifier の通知は失敗させる
+    struct FakeCenter {
+        status: Option<UNAuthorizationStatus>,
+        fail: Vec<&'static str>,
+        log: RefCell<Vec<String>>,
+    }
+
+    impl FakeCenter {
+        fn new(status: Option<UNAuthorizationStatus>) -> Self {
+            Self {
+                status,
+                fail: Vec::new(),
+                log: RefCell::new(Vec::new()),
+            }
+        }
+    }
+
+    impl Center for FakeCenter {
+        fn status(&self) -> Option<UNAuthorizationStatus> {
+            self.log.borrow_mut().push("status".into());
+            self.status
+        }
+
+        fn send(&self, notification: &Notification) -> Result<(), String> {
+            self.log
+                .borrow_mut()
+                .push(format!("send {}", notification.identifier));
+            if self.fail.contains(&notification.identifier.as_str()) {
+                Err(format!("rejected {}", notification.identifier))
+            } else {
+                Ok(())
+            }
+        }
+
+        fn pause(&self) {
+            self.log.borrow_mut().push("pause".into());
+        }
+    }
+
+    fn notification(identifier: &str) -> Notification {
+        Notification {
+            identifier: identifier.into(),
+            title: "Home / #general".into(),
+            subtitle: None,
+            message: "本文".into(),
+            open: None,
+        }
+    }
+
+    #[test]
+    fn sends_one_by_one_with_a_pause_between() {
+        let center = FakeCenter::new(Some(UNAuthorizationStatus::Authorized));
+
+        let failures = deliver(&center, &[notification("a"), notification("b"), notification("c")]);
+
+        assert_eq!(failures, Ok(Vec::new()));
+        assert_eq!(
+            *center.log.borrow(),
+            ["status", "send a", "pause", "send b", "pause", "send c"]
+        );
+    }
+
+    #[test]
+    fn keeps_sending_after_a_failure() {
+        let mut center = FakeCenter::new(Some(UNAuthorizationStatus::Authorized));
+        center.fail = vec!["b"];
+
+        let failures = deliver(&center, &[notification("a"), notification("b"), notification("c")]);
+
+        assert_eq!(failures, Ok(vec!["rejected b".to_owned()]));
+        assert!(center.log.borrow().contains(&"send c".to_owned()));
+    }
+
+    #[test]
+    fn sends_nothing_without_permission() {
+        let center = FakeCenter::new(Some(UNAuthorizationStatus::Denied));
+
+        let result = deliver(&center, &[notification("a")]);
+
+        assert_eq!(result, Err(Refused::NotAllowed));
+        assert_eq!(*center.log.borrow(), ["status"]);
+    }
+
+    #[test]
+    fn sends_nothing_when_settings_cannot_be_read() {
+        let center = FakeCenter::new(None);
+
+        let result = deliver(&center, &[notification("a")]);
+
+        assert_eq!(result, Err(Refused::SettingsUnreadable));
+        assert_eq!(*center.log.borrow(), ["status"]);
+    }
+
+    #[test]
+    fn allows_authorized_and_provisional_only() {
+        assert!(allows(UNAuthorizationStatus::Authorized));
+        assert!(allows(UNAuthorizationStatus::Provisional));
+        assert!(!allows(UNAuthorizationStatus::Denied));
+        assert!(!allows(UNAuthorizationStatus::NotDetermined));
     }
 }
