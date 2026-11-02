@@ -9,7 +9,7 @@ use crate::env::Env;
 use crate::l10n;
 use crate::read;
 use crate::slack::{AuthTest, Client, Message};
-use crate::state::{ts_seconds, Cache, Item, Seen};
+use crate::state::{ts_seconds, Cache, Item, Seen, SeenKey};
 
 const SECONDS_PER_DAY: i64 = 86_400;
 
@@ -108,7 +108,7 @@ pub fn fetch_with(env: &Env) -> Result<Vec<Report>> {
     items.sort_by_key(|item| std::cmp::Reverse((ts_seconds(&item.ts), item.ts.clone())));
 
     let cutoff = now.timestamp() - i64::from(config.days) * SECONDS_PER_DAY;
-    let (new_items, seen) = diff(previous_seen.as_ref(), &items, cutoff);
+    let (new_items, mut seen) = diff(previous_seen.as_ref(), &items, cutoff);
     let reports: Vec<Report> = config
         .workspace
         .iter()
@@ -130,7 +130,14 @@ pub fn fetch_with(env: &Env) -> Result<Vec<Report>> {
             },
         })
         .collect();
-    (env.notify)(&new_items, &users, &teams);
+    // 出せなかった通知の未読は、通知済みにしない。次の取得で、もう一度知らせる
+    let delivered: BTreeSet<SeenKey> = (env.notify)(&new_items, &users, &teams).into_iter().collect();
+    for item in &new_items {
+        let key = item.key();
+        if !delivered.contains(&key) {
+            seen.remove(&key);
+        }
+    }
 
     store.save_seen(&seen)?;
     store.save_cache(&Cache {
@@ -698,6 +705,27 @@ mod flow_tests {
         fetch_with(&world.env).unwrap();
 
         assert_eq!(*world.notified.borrow(), [DM, MENTION]);
+    }
+
+    #[test]
+    fn unread_that_could_not_be_notified_is_tried_again() {
+        // 通知を出せないあいだ（許可が無い、CLI の atme fetch など）は、通知済みにしない
+        let mut world = world(HOME);
+        slack_for_home(&mut world.server, "0.000000");
+        world.delivering.set(false);
+
+        fetch_with(&world.env).unwrap();
+
+        assert!(world.notified.borrow().is_empty());
+        assert!(world.env.store.load_seen().unwrap().unwrap().is_empty());
+        assert_eq!(cached_ts(&world), [DM, MENTION]);
+
+        // 出せるようになったら、まだ知らせていない未読を知らせる
+        world.delivering.set(true);
+        fetch_with(&world.env).unwrap();
+
+        assert_eq!(*world.notified.borrow(), [DM, MENTION]);
+        assert_eq!(world.env.store.load_seen().unwrap().unwrap().len(), 2);
     }
 
     #[test]

@@ -9,7 +9,7 @@ use crate::config::{self, Workspace};
 use crate::credentials::Token;
 use crate::notify;
 use crate::slack;
-use crate::state::{Item, Store, Users};
+use crate::state::{Item, SeenKey, Store, Users};
 
 pub struct Env {
     /// 設定ファイルの置き場所
@@ -23,8 +23,8 @@ pub struct Env {
     pub save_token: Box<dyn Fn(&Token, &str) -> Result<()>>,
     /// name のワークスペースの token を消す
     pub delete_token: Box<dyn Fn(&str) -> Result<()>>,
-    /// 新着を通知する
-    pub notify: Box<dyn Fn(&[Item], &Users, &BTreeMap<String, String>)>,
+    /// まだ知らせていない未読を通知し、実際に知らせることができた未読を返す
+    pub notify: Box<dyn Fn(&[Item], &Users, &BTreeMap<String, String>) -> Vec<SeenKey>>,
     /// さかのぼる日付と、通知済みの記録を捨てる境目の基準にする時刻
     pub now: DateTime<Local>,
 }
@@ -48,7 +48,7 @@ impl Env {
 /// テスト用の偽の外の世界。一時的なフォルダに設定と状態を置き、token はメモリの表に出し入れし、通知は記録するだけ
 #[cfg(test)]
 pub mod fake {
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
     use std::rc::Rc;
 
     use chrono::TimeZone;
@@ -63,6 +63,8 @@ pub mod fake {
         pub notified: Rc<RefCell<Vec<String>>>,
         /// 通知した項目の題（ワークスペース名 / 場所）。通知に渡されたワークスペース名の対応で作る
         pub titles: Rc<RefCell<Vec<String>>>,
+        /// 通知を出せるか（false のときは、許可が無いときのように何も出せない）
+        pub delivering: Rc<Cell<bool>>,
         _dir: tempfile::TempDir,
     }
 
@@ -75,6 +77,8 @@ pub mod fake {
         let notified = Rc::new(RefCell::new(Vec::new()));
         let titles = Rc::new(RefCell::new(Vec::new()));
         let record_titles = Rc::clone(&titles);
+        let delivering = Rc::new(Cell::new(true));
+        let can_deliver = Rc::clone(&delivering);
         let (read, save, delete, record) = (
             Rc::clone(&tokens),
             Rc::clone(&tokens),
@@ -98,12 +102,16 @@ pub mod fake {
                 Ok(())
             }),
             notify: Box::new(move |items, _users, teams| {
+                if !can_deliver.get() {
+                    return Vec::new();
+                }
                 record
                     .borrow_mut()
                     .extend(items.iter().map(|item| item.ts.clone()));
                 record_titles
                     .borrow_mut()
                     .extend(items.iter().map(|item| crate::display::location(item, teams)));
+                items.iter().map(Item::key).collect()
             }),
             // 2026-11-01 12:00。さかのぼる日付は 7 日前の 2026-10-25
             now: Local.with_ymd_and_hms(2026, 11, 1, 12, 0, 0).unwrap(),
@@ -113,6 +121,7 @@ pub mod fake {
             tokens,
             notified,
             titles,
+            delivering,
             _dir: dir,
         }
     }

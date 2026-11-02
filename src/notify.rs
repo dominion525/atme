@@ -15,7 +15,7 @@ use objc2_user_notifications::{
 use crate::app;
 use crate::display;
 use crate::l10n;
-use crate::state::{Item, Users};
+use crate::state::{Item, SeenKey, Users};
 
 pub const PERMALINK_KEY: &str = "permalink";
 const MAX_INDIVIDUAL: usize = 5;
@@ -30,26 +30,36 @@ struct Notification {
     subtitle: Option<String>,
     message: String,
     open: Option<String>,
+    /// この通知で知らせる未読（個別の通知はその 1 件、まとめの通知は個別に出さなかった残り）
+    covers: Vec<SeenKey>,
 }
 
-pub fn notify(items: &[Item], users: &Users, teams: &BTreeMap<String, String>) {
+/// items を通知し、実際に知らせることができた未読を返す。出せなかった分は返さない（次の取得で、もう一度知らせる）
+pub fn notify(items: &[Item], users: &Users, teams: &BTreeMap<String, String>) -> Vec<SeenKey> {
     let notifications = plan(items, users, teams);
     if notifications.is_empty() {
-        return;
+        return Vec::new();
     }
     if !app::in_app_bundle() {
         eprintln!("{}", l10n::text(l10n::OUTSIDE_APP_NOTIFY));
-        return;
+        return Vec::new();
     }
     match deliver(&SystemCenter::new(), &notifications) {
-        Ok(failures) => {
-            for failure in failures {
+        Ok(sent) => {
+            for failure in sent.failures {
                 eprintln!("{}", l10n::format(l10n::NOTIFY_FAILED, &[&failure]));
             }
+            sent.delivered
         }
-        Err(Refused::NotAllowed) => eprintln!("{}", l10n::text(l10n::NOTIFICATIONS_NOT_ALLOWED_OPEN)),
-        Err(Refused::SettingsUnreadable) => {
-            eprintln!("{}", l10n::text(l10n::NOTIFICATION_SETTINGS_UNREADABLE))
+        Err(refused) => {
+            eprintln!(
+                "{}",
+                l10n::text(match refused {
+                    Refused::NotAllowed => l10n::NOTIFICATIONS_NOT_ALLOWED_OPEN,
+                    Refused::SettingsUnreadable => l10n::NOTIFICATION_SETTINGS_UNREADABLE,
+                })
+            );
+            Vec::new()
         }
     }
 }
@@ -69,24 +79,37 @@ enum Refused {
     SettingsUnreadable,
 }
 
-/// 許可があれば、notifications を 1 件ずつ出す。出せなかったものの理由を返す（途中で失敗しても残りは出す）
-fn deliver(center: &impl Center, notifications: &[Notification]) -> Result<Vec<String>, Refused> {
+/// deliver の結果
+#[derive(Debug, PartialEq)]
+struct Sent {
+    /// 出せた通知が知らせた未読
+    delivered: Vec<SeenKey>,
+    /// 出せなかった通知の理由
+    failures: Vec<String>,
+}
+
+/// 許可があれば、notifications を 1 件ずつ出す（途中で失敗しても残りは出す）
+fn deliver(center: &impl Center, notifications: &[Notification]) -> Result<Sent, Refused> {
     match center.status() {
         None => return Err(Refused::SettingsUnreadable),
         Some(status) if !allows(status) => return Err(Refused::NotAllowed),
         Some(_) => {}
     }
-    let mut failures = Vec::new();
+    let mut sent = Sent {
+        delivered: Vec::new(),
+        failures: Vec::new(),
+    };
     for (index, notification) in notifications.iter().enumerate() {
         // 同時に出すとバナーが 1 つにまとめられるので、間隔をあけて 1 件ずつ出す
         if index > 0 {
             center.pause();
         }
-        if let Err(error) = center.send(notification) {
-            failures.push(error);
+        match center.send(notification) {
+            Ok(()) => sent.delivered.extend(notification.covers.iter().cloned()),
+            Err(error) => sent.failures.push(error),
         }
     }
-    Ok(failures)
+    Ok(sent)
 }
 
 /// 通知を出してよい許可の状態（許可済みと、仮の許可）
@@ -177,6 +200,7 @@ fn plan(items: &[Item], users: &Users, teams: &BTreeMap<String, String>) -> Vec<
             subtitle: None,
             message: l10n::format(l10n::AND_MORE, &[&(items.len() - MAX_INDIVIDUAL).to_string()]),
             open: None,
+            covers: items[MAX_INDIVIDUAL..].iter().map(Item::key).collect(),
         });
     }
     let empty = BTreeMap::new();
@@ -188,6 +212,7 @@ fn plan(items: &[Item], users: &Users, teams: &BTreeMap<String, String>) -> Vec<
             subtitle: display::sender(item).map(str::to_owned),
             message: display::summary(&item.text, names, MESSAGE_CHARS),
             open: Some(item.permalink.clone()),
+            covers: vec![item.key()],
         }
     }));
     notifications
@@ -197,6 +222,30 @@ fn plan(items: &[Item], users: &Users, teams: &BTreeMap<String, String>) -> Vec<
 mod tests {
     use super::*;
     use crate::display::tests::item;
+
+    #[test]
+    fn each_notification_covers_the_unread_it_tells_about() {
+        // 7 件のうち、新しい 5 件は個別に、残りの 2 件はまとめの通知で知らせる
+        let items: Vec<Item> = (1..=7).rev().map(|n| item("C1", &format!("{n}.0"))).collect();
+
+        let planned = plan(&items, &Users::new(), &BTreeMap::new());
+
+        let covered: Vec<Vec<String>> = planned
+            .iter()
+            .map(|notification| notification.covers.iter().map(|key| key.ts.clone()).collect())
+            .collect();
+        assert_eq!(
+            covered,
+            [
+                vec!["2.0".to_owned(), "1.0".to_owned()],
+                vec!["3.0".to_owned()],
+                vec!["4.0".to_owned()],
+                vec!["5.0".to_owned()],
+                vec!["6.0".to_owned()],
+                vec!["7.0".to_owned()],
+            ]
+        );
+    }
 
     #[test]
     fn plans_individual_notifications_oldest_first() {
@@ -220,6 +269,7 @@ mod tests {
             subtitle: Some("相手".into()),
             message: "本文".into(),
             open: Some("https://example.slack.com/archives/C1/p1".into()),
+            covers: Vec::new(),
         };
 
         let content = content(&notification);
@@ -242,6 +292,7 @@ mod tests {
             subtitle: None,
             message: "And 2 more".into(),
             open: None,
+            covers: Vec::new(),
         };
 
         let content = content(&notification);
@@ -316,6 +367,7 @@ mod delivery_tests {
         }
     }
 
+    /// identifier の未読 1 件を知らせる通知
     fn notification(identifier: &str) -> Notification {
         Notification {
             identifier: identifier.into(),
@@ -323,6 +375,15 @@ mod delivery_tests {
             subtitle: None,
             message: "本文".into(),
             open: None,
+            covers: vec![key(identifier)],
+        }
+    }
+
+    fn key(ts: &str) -> SeenKey {
+        SeenKey {
+            workspace: "home".into(),
+            channel: "C1".into(),
+            ts: ts.into(),
         }
     }
 
@@ -330,9 +391,15 @@ mod delivery_tests {
     fn sends_one_by_one_with_a_pause_between() {
         let center = FakeCenter::new(Some(UNAuthorizationStatus::Authorized));
 
-        let failures = deliver(&center, &[notification("a"), notification("b"), notification("c")]);
+        let sent = deliver(&center, &[notification("a"), notification("b"), notification("c")]);
 
-        assert_eq!(failures, Ok(Vec::new()));
+        assert_eq!(
+            sent,
+            Ok(Sent {
+                delivered: vec![key("a"), key("b"), key("c")],
+                failures: Vec::new(),
+            })
+        );
         assert_eq!(
             *center.log.borrow(),
             ["status", "send a", "pause", "send b", "pause", "send c"]
@@ -344,9 +411,16 @@ mod delivery_tests {
         let mut center = FakeCenter::new(Some(UNAuthorizationStatus::Authorized));
         center.fail = vec!["b"];
 
-        let failures = deliver(&center, &[notification("a"), notification("b"), notification("c")]);
+        let sent = deliver(&center, &[notification("a"), notification("b"), notification("c")]);
 
-        assert_eq!(failures, Ok(vec!["rejected b".to_owned()]));
+        // 出せなかった b は、知らせた未読に入れない（次の取得で、もう一度知らせる）
+        assert_eq!(
+            sent,
+            Ok(Sent {
+                delivered: vec![key("a"), key("c")],
+                failures: vec!["rejected b".to_owned()],
+            })
+        );
         assert!(center.log.borrow().contains(&"send c".to_owned()));
     }
 
