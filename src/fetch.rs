@@ -426,6 +426,22 @@ mod tests {
     }
 
     #[test]
+    fn to_item_keeps_the_thread_parent_from_the_permalink() {
+        let mut reply = message("C1", Some("U3"), "200.000002");
+        reply.permalink =
+            "https://home.slack.com/archives/C1/p200000002?thread_ts=100.000001&cid=C1".into();
+
+        let item = to_item("home", reply, &BTreeMap::new());
+
+        assert_eq!(item.thread_ts.as_deref(), Some("100.000001"));
+        assert_eq!(item.reply_parent(), Some("100.000001"));
+        assert_eq!(
+            to_item("home", message("C1", Some("U3"), "300.000003"), &BTreeMap::new()).thread_ts,
+            None
+        );
+    }
+
+    #[test]
     fn first_run_reports_nothing_and_records_all() {
         let items = [item("C1", "1000.000001"), item("C2", "1000.000002")];
 
@@ -674,6 +690,96 @@ mod flow_tests {
             permalink: format!("https://{workspace}.slack.com/archives/C9/p9"),
             thread_ts: None,
         }
+    }
+
+    /// #general のスレッド（親は PARENT）の返信でのメンション
+    const PARENT: &str = "1793490000.000100";
+    const REPLY: &str = "1793508000.000300";
+
+    /// home の Slack：スレッドの返信でのメンションだけがある。#general は general_last_read まで、スレッドは thread_last_read まで読んである
+    fn slack_with_reply(
+        server: &mut ServerGuard,
+        general_last_read: &str,
+        subscribed: bool,
+        thread_last_read: &str,
+    ) {
+        respond(
+            server,
+            "auth.test",
+            &[],
+            r#"{"ok":true,"user_id":"U0ME","team":"Home","team_id":"T1","url":"https://home.slack.com/"}"#,
+        );
+        respond(
+            server,
+            "search.messages",
+            &[("query", "<@U0ME> after:2026-10-25")],
+            &format!(
+                r#"{{"ok":true,"messages":{{"paging":{{"pages":1}},"matches":[
+                    {{"channel":{{"id":"C1","name":"general"}},"user":"U1","ts":"{REPLY}","text":"<@U0ME> スレッドで質問です","permalink":"https://home.slack.com/archives/C1/p1793508000000300?thread_ts={PARENT}&cid=C1"}}
+                ]}}}}"#
+            ),
+        );
+        respond(
+            server,
+            "search.messages",
+            &[("query", "to:me after:2026-10-25")],
+            r#"{"ok":true,"messages":{"paging":{"pages":1},"matches":[]}}"#,
+        );
+        for (id, name) in [("U0ME", "鈴木"), ("U1", "佐藤")] {
+            respond(
+                server,
+                "users.info",
+                &[("user", id)],
+                &format!(r#"{{"ok":true,"user":{{"name":"{id}","profile":{{"display_name":"{name}"}}}}}}"#),
+            );
+        }
+        respond(
+            server,
+            "conversations.info",
+            &[("channel", "C1")],
+            &format!(r#"{{"ok":true,"channel":{{"last_read":"{general_last_read}"}}}}"#),
+        );
+        respond(
+            server,
+            "conversations.replies",
+            &[("channel", "C1"), ("ts", PARENT)],
+            &format!(
+                r#"{{"ok":true,"messages":[{{"subscribed":{subscribed},"last_read":"{thread_last_read}"}}]}}"#
+            ),
+        );
+    }
+
+    #[test]
+    fn reply_is_judged_by_its_thread_not_the_channel() {
+        // #general は返信より先まで読んであるが、スレッドはまだ読んでいない
+        let mut world = world(HOME);
+        slack_with_reply(&mut world.server, "1793509000.000000", true, PARENT);
+        world.env.store.save_seen(&Seen::new()).unwrap();
+
+        fetch_with(&world.env).unwrap();
+
+        assert_eq!(cached_ts(&world), [REPLY]);
+        assert_eq!(*world.notified.borrow(), [REPLY]);
+    }
+
+    #[test]
+    fn reply_disappears_once_the_thread_is_read() {
+        let mut world = world(HOME);
+        slack_with_reply(&mut world.server, "0.000000", true, REPLY);
+
+        fetch_with(&world.env).unwrap();
+
+        assert!(cached_ts(&world).is_empty());
+    }
+
+    #[test]
+    fn reply_in_a_thread_not_followed_is_left_out() {
+        let mut world = world(HOME);
+        slack_with_reply(&mut world.server, "0.000000", false, PARENT);
+
+        fetch_with(&world.env).unwrap();
+
+        assert!(cached_ts(&world).is_empty());
     }
 
     /// 検索の範囲から外れた、前回からの home の未読（#random）。通知済みの記録にも入っている
