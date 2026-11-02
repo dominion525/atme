@@ -37,6 +37,8 @@ impl ReadSource for Client {
 pub struct Client {
     http: HttpClient,
     token: Token,
+    /// API の URL の頭（ふだんは API_URL。テストではモックサーバーに向ける）
+    base: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -152,10 +154,19 @@ struct ReplyMessage {
 
 impl Client {
     pub fn new(token: Token) -> Result<Self> {
+        Self::with_base(token, API_URL)
+    }
+
+    /// API の URL の頭を指定して作る
+    pub fn with_base(token: Token, base: impl Into<String>) -> Result<Self> {
         let http = HttpClient::builder()
             .build()
             .with_context(|| l10n::text(l10n::HTTP_CLIENT_FAILED))?;
-        Ok(Self { http, token })
+        Ok(Self {
+            http,
+            token,
+            base: base.into(),
+        })
     }
 
     pub fn auth_test(&self) -> Result<AuthTest> {
@@ -214,7 +225,7 @@ impl Client {
     fn call<T: DeserializeOwned>(&self, method: &str, params: &[(&str, &str)]) -> Result<T> {
         let response = self
             .http
-            .post(format!("{API_URL}/{method}"))
+            .post(format!("{}/{method}", self.base))
             .bearer_auth(self.token.as_str())
             .form(params)
             .send()
@@ -236,5 +247,212 @@ impl Client {
         }
         serde_json::from_str(&body)
             .with_context(|| l10n::format(l10n::RESPONSE_PARSE_FAILED, &[method]))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mockito::{Matcher, Server, ServerGuard};
+
+    const TOKEN: &str = "xoxp-test";
+
+    fn client(server: &ServerGuard) -> Client {
+        Client::with_base(Token::new(TOKEN.into()), server.url()).unwrap()
+    }
+
+    /// method への POST に、token の Authorization を付けて送ってきたら body を返す
+    fn respond(server: &mut ServerGuard, method: &str, body: &str) -> mockito::Mock {
+        server
+            .mock("POST", format!("/{method}").as_str())
+            .match_header("authorization", format!("Bearer {TOKEN}").as_str())
+            .with_header("content-type", "application/json")
+            .with_body(body)
+            .create()
+    }
+
+    #[test]
+    fn auth_test_sends_the_token_and_reads_the_workspace() {
+        let mut server = Server::new();
+        let mock = respond(
+            &mut server,
+            "auth.test",
+            r#"{"ok":true,"user_id":"U1","team":"Acme","team_id":"T1","url":"https://acme.slack.com/"}"#,
+        );
+
+        let auth = client(&server).auth_test().unwrap();
+
+        mock.assert();
+        assert_eq!(auth.user_id, "U1");
+        assert_eq!(auth.team, "Acme");
+        assert_eq!(auth.team_id, "T1");
+        assert_eq!(auth.url, "https://acme.slack.com/");
+    }
+
+    fn search_page(page: u32, pages: u32, ts: &str) -> String {
+        format!(
+            r#"{{"ok":true,"messages":{{"paging":{{"page":{page},"pages":{pages}}},"matches":[
+                {{"channel":{{"id":"C1","name":"general"}},"user":"U2","ts":"{ts}","text":"hi","permalink":"https://acme.slack.com/archives/C1/p1"}}
+            ]}}}}"#
+        )
+    }
+
+    #[test]
+    fn search_messages_reads_every_page() {
+        let mut server = Server::new();
+        let pages: Vec<_> = [("1", "1.000001"), ("2", "2.000002")]
+            .iter()
+            .map(|(page, ts)| {
+                server
+                    .mock("POST", "/search.messages")
+                    .match_body(Matcher::AllOf(vec![
+                        Matcher::UrlEncoded("query".into(), "to:me".into()),
+                        Matcher::UrlEncoded("count".into(), "100".into()),
+                        Matcher::UrlEncoded("page".into(), (*page).into()),
+                    ]))
+                    .with_body(search_page(page.parse().unwrap(), 2, ts))
+                    .create()
+            })
+            .collect();
+
+        let messages = client(&server).search_messages("to:me").unwrap();
+
+        for page in pages {
+            page.assert();
+        }
+        let ts: Vec<&str> = messages.iter().map(|message| message.ts.as_str()).collect();
+        assert_eq!(ts, ["1.000001", "2.000002"]);
+        assert_eq!(messages[0].channel.name, "general");
+        assert!(!messages[0].channel.is_im);
+    }
+
+    #[test]
+    fn users_info_reads_the_user() {
+        let mut server = Server::new();
+        respond(
+            &mut server,
+            "users.info",
+            r#"{"ok":true,"user":{"name":"sato","profile":{"display_name":"","real_name":"Sato Taro"}}}"#,
+        );
+
+        let user = client(&server).users_info("U2").unwrap();
+
+        assert_eq!(user.label(), "Sato Taro");
+    }
+
+    #[test]
+    fn label_prefers_display_name_then_real_name_then_name() {
+        let user = |display: &str, real: &str| User {
+            name: "sato".into(),
+            profile: Profile {
+                display_name: display.into(),
+                real_name: real.into(),
+            },
+        };
+
+        assert_eq!(user("Taro", "Sato Taro").label(), "Taro");
+        assert_eq!(user("", "Sato Taro").label(), "Sato Taro");
+        assert_eq!(user("", "").label(), "sato");
+    }
+
+    #[test]
+    fn conversation_state_reads_archived_and_last_read() {
+        let mut server = Server::new();
+        respond(
+            &mut server,
+            "conversations.info",
+            r#"{"ok":true,"channel":{"is_archived":true,"last_read":"1.000100"}}"#,
+        );
+
+        let state = client(&server).conversation_state("C1").unwrap();
+
+        assert!(state.archived);
+        assert_eq!(state.last_read.as_deref(), Some("1.000100"));
+    }
+
+    #[test]
+    fn thread_state_reads_the_parent() {
+        let mut server = Server::new();
+        server
+            .mock("POST", "/conversations.replies")
+            .match_body(Matcher::AllOf(vec![
+                Matcher::UrlEncoded("channel".into(), "C1".into()),
+                Matcher::UrlEncoded("ts".into(), "1.000100".into()),
+                Matcher::UrlEncoded("limit".into(), "1".into()),
+            ]))
+            .with_body(r#"{"ok":true,"messages":[{"subscribed":true,"last_read":"1.000200"}]}"#)
+            .create();
+
+        let state = client(&server).thread_state("C1", "1.000100").unwrap();
+
+        assert!(state.subscribed);
+        assert_eq!(state.last_read.as_deref(), Some("1.000200"));
+    }
+
+    #[test]
+    fn thread_without_parent_is_an_error() {
+        let mut server = Server::new();
+        respond(&mut server, "conversations.replies", r#"{"ok":true,"messages":[]}"#);
+
+        let error = client(&server).thread_state("C1", "1.000100").unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "conversations.replies didn't return the thread parent"
+        );
+    }
+
+    #[test]
+    fn slack_error_is_reported_with_its_code() {
+        let mut server = Server::new();
+        respond(&mut server, "auth.test", r#"{"ok":false,"error":"invalid_auth"}"#);
+
+        let error = client(&server).auth_test().unwrap_err();
+
+        assert_eq!(error.to_string(), "auth.test failed: invalid_auth");
+    }
+
+    #[test]
+    fn http_error_is_reported_with_its_status() {
+        let mut server = Server::new();
+        server.mock("POST", "/auth.test").with_status(500).create();
+
+        let error = client(&server).auth_test().unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "auth.test returned HTTP 500 Internal Server Error"
+        );
+    }
+
+    #[test]
+    fn broken_response_is_reported() {
+        let mut server = Server::new();
+        respond(&mut server, "auth.test", "<html>not json</html>");
+
+        let error = client(&server).auth_test().unwrap_err();
+
+        assert_eq!(error.to_string(), "Couldn't parse the response of auth.test");
+    }
+
+    #[test]
+    fn unreachable_server_is_reported() {
+        // 何も待ち受けていない手元のポートに向ける
+        let client = Client::with_base(Token::new(TOKEN.into()), "http://127.0.0.1:9").unwrap();
+
+        let error = client.auth_test().unwrap_err();
+
+        assert_eq!(error.to_string(), "Couldn't call auth.test");
+    }
+
+    #[test]
+    fn read_source_treats_errors_as_unknown() {
+        let mut server = Server::new();
+        respond(&mut server, "conversations.info", r#"{"ok":false,"error":"channel_not_found"}"#);
+        respond(&mut server, "conversations.replies", r#"{"ok":false,"error":"thread_not_found"}"#);
+        let client = client(&server);
+
+        assert!(client.channel("C1").is_none());
+        assert!(client.thread("C1", "1.000100").is_none());
     }
 }
