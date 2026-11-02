@@ -4,23 +4,31 @@ use url::Url;
 /// ビルドのときに埋め込む。リポジトリの manifest と、ボタンが開く manifest をずらさないため
 const MANIFEST: &str = include_str!("../slack-app-manifest.json");
 
-/// atme が使う user token のスコープと、それを要る API
+/// atme が呼ぶ Slack の API と、それぞれが要る user token のスコープ。
+/// manifest のスコープは、これを集めたものとちょうど一致させる（テストで確かめる）
 #[cfg_attr(not(test), allow(dead_code))]
-pub const USER_SCOPES: &[&str] = &[
-    // search.messages（自分宛のメンションと DM を探す）
-    "search:read",
-    // users.info（送り主と DM の相手の表示名）
-    "users:read",
-    // conversations.info（チャンネルの既読の位置）
-    "channels:read",
-    "groups:read",
-    "im:read",
-    "mpim:read",
-    // conversations.replies（スレッドの既読の位置）
-    "channels:history",
-    "groups:history",
-    "im:history",
-    "mpim:history",
+pub const API_SCOPES: &[(&str, &[&str])] = &[
+    // 自分の ID とワークスペースを知る。スコープは要らない
+    ("auth.test", &[]),
+    // 自分宛のメンションと DM を探す
+    ("search.messages", &["search:read"]),
+    // 送り主と DM の相手の表示名
+    ("users.info", &["users:read"]),
+    // チャンネル・非公開チャンネル・DM・グループ DM の既読の位置
+    (
+        "conversations.info",
+        &["channels:read", "groups:read", "im:read", "mpim:read"],
+    ),
+    // それぞれのスレッドの既読の位置
+    (
+        "conversations.replies",
+        &[
+            "channels:history",
+            "groups:history",
+            "im:history",
+            "mpim:history",
+        ],
+    ),
 ];
 
 /// manifest を入れた状態で、Slack App を作る画面を開くリンク
@@ -46,18 +54,37 @@ mod tests {
     }
 
     #[test]
-    fn requests_exactly_the_scopes_atme_uses() {
-        let mut scopes: Vec<String> = manifest()["oauth_config"]["scopes"]["user"]
+    fn every_api_atme_calls_has_its_scopes_listed() {
+        // slack.rs の self.call("…") から、実際に呼んでいる API を拾う
+        let source = include_str!("slack.rs");
+        let called: std::collections::BTreeSet<&str> = source
+            .split("self.call(")
+            .skip(1)
+            .filter_map(|rest| rest.split('"').nth(1))
+            .collect();
+        let listed: std::collections::BTreeSet<&str> =
+            API_SCOPES.iter().map(|(method, _)| *method).collect();
+
+        assert_eq!(called, listed);
+    }
+
+    #[test]
+    fn requests_exactly_the_scopes_the_apis_need() {
+        let mut requested: Vec<String> = manifest()["oauth_config"]["scopes"]["user"]
             .as_array()
             .expect("user のスコープが無い")
             .iter()
             .map(|scope| scope.as_str().unwrap().to_owned())
             .collect();
-        scopes.sort();
-        let mut expected: Vec<&str> = USER_SCOPES.to_vec();
-        expected.sort();
+        requested.sort();
+        let mut needed: Vec<String> = API_SCOPES
+            .iter()
+            .flat_map(|(_, scopes)| scopes.iter().map(|scope| (*scope).to_owned()))
+            .collect();
+        needed.sort();
+        needed.dedup();
 
-        assert_eq!(scopes, expected);
+        assert_eq!(requested, needed);
     }
 
     #[test]
