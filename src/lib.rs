@@ -4,6 +4,7 @@ pub mod config;
 pub mod credentials;
 pub mod dismiss;
 pub mod display;
+pub mod env;
 pub mod fetch;
 pub mod l10n;
 pub mod list;

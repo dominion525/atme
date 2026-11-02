@@ -11,13 +11,20 @@ use crate::state::{ts_seconds, Cache, Store, Users};
 const TEXT_CHARS: usize = 100;
 
 pub fn run() -> Result<()> {
-    let store = Store::open()?;
+    print!("{}", output(&Store::open()?, &Local)?);
+    Ok(())
+}
+
+/// store のキャッシュから、atme list が出す文を作る
+fn output<Tz: TimeZone>(store: &Store, tz: &Tz) -> Result<String>
+where
+    Tz::Offset: Display,
+{
     let Some(cache) = store.load_cache()? else {
         bail!(l10n::text(l10n::NO_CACHE_RUN_FETCH));
     };
     let users = store.load_users()?.unwrap_or_default();
-    print!("{}", text(&cache, &users, &Local));
-    Ok(())
+    Ok(text(&cache, &users, tz))
 }
 
 fn text<Tz: TimeZone>(cache: &Cache, users: &Users, tz: &Tz) -> String
@@ -44,6 +51,29 @@ where
 mod tests {
     use super::*;
     use crate::display::tests::{cache, jst, users};
+
+    #[test]
+    fn output_needs_a_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path().to_path_buf());
+
+        let error = output(&store, &jst()).unwrap_err();
+
+        assert_eq!(error.to_string(), "No cache. Run atme fetch");
+    }
+
+    #[test]
+    fn output_reads_the_cache_and_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path().to_path_buf());
+        store.save_cache(&cache()).unwrap();
+        store.save_users(&users()).unwrap();
+
+        assert_eq!(
+            output(&store, &jst()).unwrap(),
+            text(&cache(), &users(), &jst())
+        );
+    }
 
     #[test]
     fn formats_text() {

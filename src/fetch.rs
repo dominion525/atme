@@ -1,48 +1,17 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
-use std::path::PathBuf;
 
 use anyhow::{bail, Result};
-use chrono::{DateTime, Local, NaiveDate, TimeDelta};
+use chrono::{NaiveDate, TimeDelta};
 
-use crate::config::{self, Config, Workspace};
-use crate::credentials::Token;
+use crate::config::{Config, Workspace};
 use crate::display;
+use crate::env::Env;
 use crate::l10n;
-use crate::notify;
 use crate::read;
-use crate::slack::{self, AuthTest, Client, Message};
-use crate::state::{ts_seconds, Cache, Item, Seen, Store, Users};
+use crate::slack::{AuthTest, Client, Message};
+use crate::state::{ts_seconds, Cache, Item, Seen};
 
 const SECONDS_PER_DAY: i64 = 86_400;
-
-/// 取得のときに触る外の世界。ふだんは Env::system()、テストではモックサーバーや一時的なフォルダに向ける
-pub struct Env {
-    /// 設定ファイルの置き場所
-    pub config: PathBuf,
-    pub store: Store,
-    /// Slack の API の URL の頭
-    pub api: String,
-    /// ワークスペースの token を読む
-    pub token: Box<dyn Fn(&Workspace) -> Result<Token>>,
-    /// 新着を通知する
-    pub notify: Box<dyn Fn(&[Item], &Users, &BTreeMap<String, String>)>,
-    /// さかのぼる日付と、通知済みの記録を捨てる境目の基準にする時刻
-    pub now: DateTime<Local>,
-}
-
-impl Env {
-    /// ふだんの外の世界（HOME の下のファイル、Slack、Keychain、macOS の通知、今の時刻）
-    pub fn system() -> Result<Self> {
-        Ok(Self {
-            config: config::path()?,
-            store: Store::open()?,
-            api: slack::API_URL.to_owned(),
-            token: Box::new(Token::load),
-            notify: Box::new(notify::notify),
-            now: Local::now(),
-        })
-    }
-}
 
 #[derive(Debug, PartialEq)]
 pub struct Report {
@@ -534,56 +503,36 @@ mod tests {
 /// 取得の流れ全体のテスト。架空の Slack（モックサーバー）と一時的なフォルダで、取得から通知と保存までを通す
 #[cfg(test)]
 mod flow_tests {
-    use std::cell::RefCell;
-    use std::rc::Rc;
-
-    use chrono::TimeZone;
     use mockito::{Matcher, Server, ServerGuard};
 
     use super::*;
+    use crate::env::fake;
 
     /// メンションのメッセージ（#general、佐藤さんから）と、DM（田中さんから）の ts
     const MENTION: &str = "1793502000.000100";
     const DM: &str = "1793505600.000200";
 
     struct World {
-        _dir: tempfile::TempDir,
+        world: fake::World,
         server: ServerGuard,
-        env: Env,
-        /// 通知した項目の ts
-        notified: Rc<RefCell<Vec<String>>>,
+    }
+
+    impl std::ops::Deref for World {
+        type Target = fake::World;
+        fn deref(&self) -> &fake::World {
+            &self.world
+        }
     }
 
     /// config を書いた設定ファイルと、空の状態のフォルダ。token は home にだけある
     fn world(config: &str) -> World {
-        let dir = tempfile::tempdir().unwrap();
-        let config_path = dir.path().join("config.toml");
-        std::fs::write(&config_path, config).unwrap();
         let server = Server::new();
-        let notified = Rc::new(RefCell::new(Vec::new()));
-        let record = Rc::clone(&notified);
-        let env = Env {
-            config: config_path,
-            store: Store::new(dir.path().join("state")),
-            api: server.url(),
-            token: Box::new(|workspace| match workspace.name.as_str() {
-                "home" => Ok(Token::new("xoxp-home".into())),
-                name => anyhow::bail!("no token for {name}"),
-            }),
-            notify: Box::new(move |items, _users, _teams| {
-                record
-                    .borrow_mut()
-                    .extend(items.iter().map(|item| item.ts.clone()))
-            }),
-            // 2026-11-01 12:00。さかのぼる日付は 7 日前の 2026-10-25
-            now: Local.with_ymd_and_hms(2026, 11, 1, 12, 0, 0).unwrap(),
-        };
-        World {
-            _dir: dir,
-            server,
-            env,
-            notified,
-        }
+        let world = fake::world(config, server.url());
+        world
+            .tokens
+            .borrow_mut()
+            .insert("home".into(), "xoxp-home".into());
+        World { world, server }
     }
 
     fn respond(server: &mut ServerGuard, method: &str, params: &[(&str, &str)], body: &str) {
