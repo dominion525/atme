@@ -1,18 +1,48 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::path::PathBuf;
 
 use anyhow::{bail, Result};
-use chrono::{Local, NaiveDate, TimeDelta};
+use chrono::{DateTime, Local, NaiveDate, TimeDelta};
 
-use crate::config::{Config, Workspace};
+use crate::config::{self, Config, Workspace};
 use crate::credentials::Token;
 use crate::display;
 use crate::l10n;
 use crate::notify;
 use crate::read;
-use crate::slack::{AuthTest, Client, Message};
-use crate::state::{ts_seconds, Cache, Item, Seen, Store};
+use crate::slack::{self, AuthTest, Client, Message};
+use crate::state::{ts_seconds, Cache, Item, Seen, Store, Users};
 
 const SECONDS_PER_DAY: i64 = 86_400;
+
+/// 取得のときに触る外の世界。ふだんは Env::system()、テストではモックサーバーや一時的なフォルダに向ける
+pub struct Env {
+    /// 設定ファイルの置き場所
+    pub config: PathBuf,
+    pub store: Store,
+    /// Slack の API の URL の頭
+    pub api: String,
+    /// ワークスペースの token を読む
+    pub token: Box<dyn Fn(&Workspace) -> Result<Token>>,
+    /// 新着を通知する
+    pub notify: Box<dyn Fn(&[Item], &Users, &BTreeMap<String, String>)>,
+    /// さかのぼる日付と、通知済みの記録を捨てる境目の基準にする時刻
+    pub now: DateTime<Local>,
+}
+
+impl Env {
+    /// ふだんの外の世界（HOME の下のファイル、Slack、Keychain、macOS の通知、今の時刻）
+    pub fn system() -> Result<Self> {
+        Ok(Self {
+            config: config::path()?,
+            store: Store::open()?,
+            api: slack::API_URL.to_owned(),
+            token: Box::new(Token::load),
+            notify: Box::new(notify::notify),
+            now: Local::now(),
+        })
+    }
+}
 
 #[derive(Debug, PartialEq)]
 pub struct Report {
@@ -55,12 +85,17 @@ pub fn run() -> Result<()> {
 }
 
 pub fn fetch_once() -> Result<Vec<Report>> {
-    let config = Config::load()?;
-    let store = Store::open()?;
+    fetch_with(&Env::system()?)
+}
+
+/// env の外の世界で、すべてのワークスペースを取得して、通知と保存まで行う
+pub fn fetch_with(env: &Env) -> Result<Vec<Report>> {
+    let config = Config::load_from(&env.config)?;
+    let store = &env.store;
     let previous_seen = store.load_seen()?;
     let previous_cache = store.load_cache()?.unwrap_or_default();
     let mut users = store.load_users()?.unwrap_or_default();
-    let now = Local::now();
+    let now = env.now;
     let after = after_date(now.date_naive(), config.days);
 
     let mut items = Vec::new();
@@ -75,7 +110,7 @@ pub fn fetch_once() -> Result<Vec<Report>> {
             .filter(|item| item.workspace == workspace.name)
             .cloned()
             .collect();
-        match fetch_workspace(workspace, &after, names, previous) {
+        match fetch_workspace(env, workspace, &after, names, previous) {
             Ok((auth, workspace_items)) => {
                 errors.push(None);
                 teams.insert(workspace.name.clone(), auth.team);
@@ -126,7 +161,7 @@ pub fn fetch_once() -> Result<Vec<Report>> {
             },
         })
         .collect();
-    notify::notify(&new_items, &users, &teams);
+    (env.notify)(&new_items, &users, &teams);
 
     store.save_seen(&seen)?;
     store.save_cache(&Cache {
@@ -144,12 +179,13 @@ pub fn fetch_once() -> Result<Vec<Report>> {
 }
 
 fn fetch_workspace(
+    env: &Env,
     workspace: &Workspace,
     after: &str,
     names: &mut BTreeMap<String, String>,
     previous: Vec<Item>,
 ) -> Result<(AuthTest, Vec<Item>)> {
-    let client = Client::new(Token::load(workspace)?)?;
+    let client = Client::with_base((env.token)(workspace)?, env.api.clone())?;
     let auth = client.auth_test()?;
     let me = auth.user_id.clone();
     let mut messages = client.search_messages(&format!("<@{me}> after:{after}"))?;
@@ -492,5 +528,291 @@ mod tests {
             .map(|item| (item.ts.as_str(), item.text.as_str()))
             .collect();
         assert_eq!(keys, [("1000.000001", "新しい本文"), ("900.000001", "")]);
+    }
+}
+
+/// 取得の流れ全体のテスト。架空の Slack（モックサーバー）と一時的なフォルダで、取得から通知と保存までを通す
+#[cfg(test)]
+mod flow_tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use chrono::TimeZone;
+    use mockito::{Matcher, Server, ServerGuard};
+
+    use super::*;
+
+    /// メンションのメッセージ（#general、佐藤さんから）と、DM（田中さんから）の ts
+    const MENTION: &str = "1793502000.000100";
+    const DM: &str = "1793505600.000200";
+
+    struct World {
+        _dir: tempfile::TempDir,
+        server: ServerGuard,
+        env: Env,
+        /// 通知した項目の ts
+        notified: Rc<RefCell<Vec<String>>>,
+    }
+
+    /// config を書いた設定ファイルと、空の状態のフォルダ。token は home にだけある
+    fn world(config: &str) -> World {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        std::fs::write(&config_path, config).unwrap();
+        let server = Server::new();
+        let notified = Rc::new(RefCell::new(Vec::new()));
+        let record = Rc::clone(&notified);
+        let env = Env {
+            config: config_path,
+            store: Store::new(dir.path().join("state")),
+            api: server.url(),
+            token: Box::new(|workspace| match workspace.name.as_str() {
+                "home" => Ok(Token::new("xoxp-home".into())),
+                name => anyhow::bail!("no token for {name}"),
+            }),
+            notify: Box::new(move |items, _users, _teams| {
+                record
+                    .borrow_mut()
+                    .extend(items.iter().map(|item| item.ts.clone()))
+            }),
+            // 2026-11-01 12:00。さかのぼる日付は 7 日前の 2026-10-25
+            now: Local.with_ymd_and_hms(2026, 11, 1, 12, 0, 0).unwrap(),
+        };
+        World {
+            _dir: dir,
+            server,
+            env,
+            notified,
+        }
+    }
+
+    fn respond(server: &mut ServerGuard, method: &str, params: &[(&str, &str)], body: &str) {
+        let body_matchers = params
+            .iter()
+            .map(|(key, value)| Matcher::UrlEncoded((*key).into(), (*value).into()))
+            .collect();
+        server
+            .mock("POST", format!("/{method}").as_str())
+            .match_header("authorization", "Bearer xoxp-home")
+            .match_body(Matcher::AllOf(body_matchers))
+            .with_body(body)
+            .create();
+    }
+
+    /// home の Slack：自分は U0ME。#general でのメンション（佐藤さん）と、田中さんからの DM が未読
+    fn slack_for_home(server: &mut ServerGuard, general_last_read: &str) {
+        respond(
+            server,
+            "auth.test",
+            &[],
+            r#"{"ok":true,"user_id":"U0ME","team":"Home","team_id":"T1","url":"https://home.slack.com/"}"#,
+        );
+        respond(
+            server,
+            "search.messages",
+            &[("query", "<@U0ME> after:2026-10-25")],
+            &format!(
+                r#"{{"ok":true,"messages":{{"paging":{{"pages":1}},"matches":[
+                    {{"channel":{{"id":"C1","name":"general"}},"user":"U1","ts":"{MENTION}","text":"<@U0ME> 確認をお願いします","permalink":"https://home.slack.com/archives/C1/p1"}}
+                ]}}}}"#
+            ),
+        );
+        respond(
+            server,
+            "search.messages",
+            &[("query", "to:me after:2026-10-25")],
+            &format!(
+                r#"{{"ok":true,"messages":{{"paging":{{"pages":1}},"matches":[
+                    {{"channel":{{"id":"D1","name":"U2","is_im":true}},"user":"U2","ts":"{DM}","text":"明日の件です","permalink":"https://home.slack.com/archives/D1/p2"}}
+                ]}}}}"#
+            ),
+        );
+        for (id, name) in [("U0ME", "鈴木"), ("U1", "佐藤"), ("U2", "田中")] {
+            respond(
+                server,
+                "users.info",
+                &[("user", id)],
+                &format!(r#"{{"ok":true,"user":{{"name":"{id}","profile":{{"display_name":"{name}"}}}}}}"#),
+            );
+        }
+        respond(
+            server,
+            "conversations.info",
+            &[("channel", "C1")],
+            &format!(r#"{{"ok":true,"channel":{{"last_read":"{general_last_read}"}}}}"#),
+        );
+        respond(
+            server,
+            "conversations.info",
+            &[("channel", "D1")],
+            r#"{"ok":true,"channel":{"last_read":"0.000000"}}"#,
+        );
+    }
+
+    const HOME: &str = "[[workspace]]\nname = \"home\"\n";
+
+    fn cached_ts(world: &World) -> Vec<String> {
+        let cache = world.env.store.load_cache().unwrap().unwrap();
+        cache.items.into_iter().map(|item| item.ts).collect()
+    }
+
+    #[test]
+    fn notifies_new_unread_messages_and_saves_them() {
+        let mut world = world(HOME);
+        slack_for_home(&mut world.server, "0.000000");
+        // 前に取得したことがある（通知済みの記録はあるが空）
+        world.env.store.save_seen(&Seen::new()).unwrap();
+
+        let reports = fetch_with(&world.env).unwrap();
+
+        assert_eq!(
+            reports,
+            [Report {
+                workspace: "Home".into(),
+                result: Ok(Counts { total: 2, new: 2 }),
+            }]
+        );
+        assert_eq!(*world.notified.borrow(), [DM, MENTION]);
+        assert_eq!(cached_ts(&world), [DM, MENTION]);
+        let cache = world.env.store.load_cache().unwrap().unwrap();
+        assert_eq!(cache.fetched_at, world.env.now.timestamp());
+        assert_eq!(cache.teams["home"], "Home");
+        assert_eq!(cache.team_ids["home"], "T1");
+        let dm = &cache.items[0];
+        assert_eq!((dm.peer_name.as_deref(), dm.user_name.as_deref()), (Some("田中"), Some("田中")));
+        assert_eq!(world.env.store.load_users().unwrap().unwrap()["home"]["U1"], "佐藤");
+        assert_eq!(world.env.store.load_seen().unwrap().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn first_fetch_saves_without_notifying() {
+        // 初めての取得では、今ある未読をまとめて通知しない
+        let mut world = world(HOME);
+        slack_for_home(&mut world.server, "0.000000");
+
+        fetch_with(&world.env).unwrap();
+
+        assert!(world.notified.borrow().is_empty());
+        assert_eq!(cached_ts(&world), [DM, MENTION]);
+        assert_eq!(world.env.store.load_seen().unwrap().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn read_messages_are_left_out() {
+        // #general は、メンションのところまで Slack で読んである
+        let mut world = world(HOME);
+        slack_for_home(&mut world.server, MENTION);
+        world.env.store.save_seen(&Seen::new()).unwrap();
+
+        fetch_with(&world.env).unwrap();
+
+        assert_eq!(*world.notified.borrow(), [DM]);
+        assert_eq!(cached_ts(&world), [DM]);
+    }
+
+    fn previous_item(workspace: &str, ts: &str) -> Item {
+        Item {
+            workspace: workspace.into(),
+            channel_id: "C9".into(),
+            channel_name: "random".into(),
+            is_im: false,
+            is_mpim: false,
+            peer_name: None,
+            user: None,
+            user_name: None,
+            ts: ts.into(),
+            text: String::new(),
+            permalink: format!("https://{workspace}.slack.com/archives/C9/p9"),
+            thread_ts: None,
+        }
+    }
+
+    #[test]
+    fn a_failing_workspace_keeps_its_previous_items() {
+        // work は token が読めずに失敗する。前回の work の未読は残す
+        let mut world = world("[[workspace]]\nname = \"home\"\n\n[[workspace]]\nname = \"work\"\n");
+        slack_for_home(&mut world.server, "0.000000");
+        world.env.store.save_seen(&Seen::new()).unwrap();
+        world
+            .env
+            .store
+            .save_cache(&Cache {
+                fetched_at: 100,
+                items: vec![previous_item("work", "1793400000.000300")],
+                teams: BTreeMap::from([("work".to_owned(), "Work".to_owned())]),
+                team_ids: BTreeMap::new(),
+            })
+            .unwrap();
+
+        let reports = fetch_with(&world.env).unwrap();
+
+        assert_eq!(reports[0].result, Ok(Counts { total: 2, new: 2 }));
+        assert_eq!(
+            reports[1],
+            Report {
+                workspace: "Work".into(),
+                result: Err("no token for work".into()),
+            }
+        );
+        assert_eq!(cached_ts(&world), [DM, MENTION, "1793400000.000300"]);
+        let cache = world.env.store.load_cache().unwrap().unwrap();
+        assert_eq!(cache.fetched_at, world.env.now.timestamp());
+    }
+
+    #[test]
+    fn every_workspace_failing_keeps_the_previous_fetched_at() {
+        let world = world("[[workspace]]\nname = \"work\"\n");
+        world
+            .env
+            .store
+            .save_cache(&Cache {
+                fetched_at: 100,
+                ..Cache::default()
+            })
+            .unwrap();
+
+        let reports = fetch_with(&world.env).unwrap();
+
+        assert!(reports[0].result.is_err());
+        assert_eq!(world.env.store.load_cache().unwrap().unwrap().fetched_at, 100);
+    }
+
+    #[test]
+    fn removed_workspace_is_forgotten() {
+        let mut world = world(HOME);
+        slack_for_home(&mut world.server, "0.000000");
+        world
+            .env
+            .store
+            .save_cache(&Cache {
+                fetched_at: 100,
+                items: vec![previous_item("old", "1793400000.000300")],
+                teams: BTreeMap::from([("old".to_owned(), "Old".to_owned())]),
+                team_ids: BTreeMap::from([("old".to_owned(), "T9".to_owned())]),
+            })
+            .unwrap();
+        world
+            .env
+            .store
+            .save_users(&BTreeMap::from([("old".to_owned(), BTreeMap::new())]))
+            .unwrap();
+
+        fetch_with(&world.env).unwrap();
+
+        let cache = world.env.store.load_cache().unwrap().unwrap();
+        assert_eq!(cached_ts(&world), [DM, MENTION]);
+        assert!(!cache.teams.contains_key("old"));
+        assert!(!cache.team_ids.contains_key("old"));
+        assert!(!world.env.store.load_users().unwrap().unwrap().contains_key("old"));
+    }
+
+    #[test]
+    fn broken_config_stops_before_touching_anything() {
+        let world = world("days = ");
+
+        let error = fetch_with(&world.env).unwrap_err();
+
+        assert!(error.to_string().starts_with("The contents of "));
+        assert!(world.env.store.load_cache().unwrap().is_none());
     }
 }

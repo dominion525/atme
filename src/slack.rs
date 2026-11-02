@@ -7,7 +7,7 @@ use crate::credentials::Token;
 use crate::l10n;
 use crate::read::{ChannelState, ReadSource, ThreadState};
 
-const API_URL: &str = "https://slack.com/api";
+pub const API_URL: &str = "https://slack.com/api";
 
 impl ReadSource for Client {
     fn channel(&self, channel: &str) -> Option<ChannelState> {
