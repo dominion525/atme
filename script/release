@@ -1,15 +1,25 @@
 #!/bin/bash
 # Developer ID で署名・公証した atme.app の zip と、Sparkle の appcast を target/dist に作る。
-# 公証の認証情報は NOTARY_KEYCHAIN_PROFILE（既定 notarytool。xcrun notarytool store-credentials で保存したもの）、
-# 署名の証明書は ATME_SIGN_IDENTITY（既定 Developer ID Application）、
-# 更新の署名は、キーチェーンにある Sparkle の鍵（generate_keys --account atme）を使う。
+# 公証の認証情報は、NOTARY_KEY_P8（App Store Connect の API キーのファイル）と NOTARY_KEY_ID・NOTARY_ISSUER_ID があればそれを、
+# 無ければ NOTARY_KEYCHAIN_PROFILE（既定 notarytool。xcrun notarytool store-credentials で保存したもの）を使う。
+# 署名の証明書は ATME_SIGN_IDENTITY（既定 Developer ID Application）。
+# 更新の署名は、SPARKLE_PRIVATE_KEY（generate_keys -x で書き出した秘密鍵）があればそれを、
+# 無ければキーチェーンにある Sparkle の鍵（generate_keys --account atme）を使う。
 # 版は Cargo.toml の version。リリースのたびに上げる（Sparkle は Info.plist の版で新旧を比べる）。
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 version=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$root/Cargo.toml" | head -n 1)
 sparkle_version=$(sed -n 's/^sparkle_version=//p' "$root/script/bundle")
-profile="${NOTARY_KEYCHAIN_PROFILE:-notarytool}"
+if [ -n "${NOTARY_KEY_P8:-}" ]; then
+  notary=(
+    --key "$NOTARY_KEY_P8"
+    --key-id "${NOTARY_KEY_ID:?NOTARY_KEY_P8 を使うときは NOTARY_KEY_ID も要ります}"
+    --issuer "${NOTARY_ISSUER_ID:?NOTARY_KEY_P8 を使うときは NOTARY_ISSUER_ID も要ります}"
+  )
+else
+  notary=(--keychain-profile "${NOTARY_KEYCHAIN_PROFILE:-notarytool}")
+fi
 export ATME_SIGN_IDENTITY="${ATME_SIGN_IDENTITY:-Developer ID Application}"
 app="$root/target/release/atme.app"
 dist="$root/target/dist"
@@ -28,7 +38,7 @@ submission="$root/target/notarize/atme.zip"
 mkdir -p "$(dirname "$submission")"
 rm -f "$submission"
 ditto -c -k --keepParent "$app" "$submission"
-result=$(xcrun notarytool submit "$submission" --keychain-profile "$profile" --wait --output-format json)
+result=$(xcrun notarytool submit "$submission" "${notary[@]}" --wait --output-format json)
 status=$(echo "$result" | sed -n 's/.*"status":"\([^"]*\)".*/\1/p')
 if [ "$status" != "Accepted" ]; then
   echo "公証が通りませんでした（status: ${status:-不明}）: $result" >&2
@@ -45,7 +55,13 @@ rm -f "$zip"
 ditto -c -k --keepParent "$app" "$zip"
 
 echo "==> appcast"
-"$root/target/sparkle-$sparkle_version/bin/generate_appcast" --account atme --download-url-prefix "$download_prefix" "$dist"
+generate_appcast="$root/target/sparkle-$sparkle_version/bin/generate_appcast"
+if [ -n "${SPARKLE_PRIVATE_KEY:-}" ]; then
+  # 鍵はコマンドの引数に載せず、標準入力で渡す
+  printf '%s' "$SPARKLE_PRIVATE_KEY" | "$generate_appcast" --ed-key-file - --download-url-prefix "$download_prefix" "$dist"
+else
+  "$generate_appcast" --account atme --download-url-prefix "$download_prefix" "$dist"
+fi
 
 echo "==> done"
 echo "$zip"
