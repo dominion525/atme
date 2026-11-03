@@ -1,5 +1,7 @@
 #!/bin/bash
-# Developer ID で署名・公証した atme.app の zip と、Sparkle の appcast を target/dist に作る。
+# Developer ID で署名・公証した atme.app の zip と、Sparkle の appcast を target/dist/<version> に作る。
+# ATME_APPCAST に今配っている appcast.xml を渡すと、それに新しい版を足した appcast を作る（前の版の項目は残る）。
+# 渡さなければ、新しい版だけの appcast を作る。
 # 公証の認証情報は、NOTARY_KEY_P8（App Store Connect の API キーのファイル）と NOTARY_KEY_ID・NOTARY_ISSUER_ID があればそれを、
 # 無ければ NOTARY_KEYCHAIN_PROFILE（既定 notarytool。xcrun notarytool store-credentials で保存したもの）を使う。
 # 署名の証明書は ATME_SIGN_IDENTITY（既定 Developer ID Application）。
@@ -22,7 +24,8 @@ else
 fi
 export ATME_SIGN_IDENTITY="${ATME_SIGN_IDENTITY:-Developer ID Application}"
 app="$root/target/release/atme.app"
-dist="$root/target/dist"
+# 版ごとに分ける。generate_appcast は置き場所の zip をすべて読み、どれにも新しい版の URL の頭を付けるため
+dist="$root/target/dist/$version"
 download_prefix="https://github.com/dominion525/atme/releases/download/v$version/"
 
 if [ -n "$(git -C "$root" status --porcelain)" ]; then
@@ -55,6 +58,9 @@ rm -f "$zip"
 ditto -c -k --keepParent "$app" "$zip"
 
 echo "==> appcast"
+if [ -n "${ATME_APPCAST:-}" ]; then
+  cp "$ATME_APPCAST" "$dist/appcast.xml"
+fi
 generate_appcast="$root/target/sparkle-$sparkle_version/bin/generate_appcast"
 if [ -n "${SPARKLE_PRIVATE_KEY:-}" ]; then
   # 鍵はコマンドの引数に載せず、標準入力で渡す
