@@ -1,0 +1,152 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    # macos-15 は arm64 のイメージ。atme は Apple silicon の macOS だけを相手にする
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      # CI と同じ版にそろえる
+      RUSTUP_TOOLCHAIN: "1.93.0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # 版は Cargo.toml にある。タグと違うと、atme が名乗る版と違う版を配ってしまう
+      - name: Check the tag against the version
+        id: version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)"
+          if [ "${tag}" != "${version}" ]; then
+            echo "タグ ${GITHUB_REF_NAME} が Cargo.toml の版 ${version} と違います" >&2
+            exit 1
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Install the build tools
+        run: |
+          rustup toolchain install "${RUSTUP_TOOLCHAIN}" --profile minimal
+          brew install librsvg
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+          HOMEBREW_NO_INSTALL_CLEANUP: 1
+
+      # script/bundle は ATME_SIGN_IDENTITY の名前で証明書を探すので、検索の対象のキーチェーンに入っていればよい
+      - name: Import the signing certificate
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          keychain="${RUNNER_TEMP}/build.keychain-db"
+          certificate="${RUNNER_TEMP}/certificate.p12"
+          echo -n "${CERTIFICATE_BASE64}" | base64 --decode > "${certificate}"
+          security create-keychain -p "${KEYCHAIN_PASSWORD}" "${keychain}"
+          security set-keychain-settings -lut 21600 "${keychain}"
+          security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${keychain}"
+          security import "${certificate}" -k "${keychain}" -P "${P12_PASSWORD}" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${KEYCHAIN_PASSWORD}" "${keychain}"
+          security list-keychain -d user -s "${keychain}" login.keychain-db
+          rm -f "${certificate}"
+
+      # 今配っている appcast に新しい版を足すので、gh-pages から読んでおく。
+      # 作業ツリーの外に置く（script/release は、作業ツリーに未コミットのものがあると止まる）
+      - name: Read the current appcast
+        id: feed
+        run: |
+          if git fetch --depth 1 origin gh-pages && git show FETCH_HEAD:appcast.xml > "${RUNNER_TEMP}/appcast.xml"; then
+            echo "appcast=${RUNNER_TEMP}/appcast.xml" >> "${GITHUB_OUTPUT}"
+          else
+            echo "gh-pages に appcast.xml がありません。新しい版だけの appcast を作ります"
+          fi
+
+      - name: Build, notarize and package
+        env:
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+          NOTARY_KEY_P8_BASE64: ${{ secrets.NOTARY_KEY_P8_BASE64 }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          ATME_APPCAST: ${{ steps.feed.outputs.appcast }}
+        run: |
+          key="${RUNNER_TEMP}/notary.p8"
+          echo -n "${NOTARY_KEY_P8_BASE64}" | base64 --decode > "${key}"
+          NOTARY_KEY_P8="${key}" script/release
+          rm -f "${key}"
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: gh release create "${GITHUB_REF_NAME}" "target/dist/${VERSION}/atme-${VERSION}.zip" --generate-notes
+
+      # ここから先はリリースができたあとに動く。失敗しても、リリースは残り、appcast か cask だけが遅れる
+      - name: Check out the update feed
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: gh-pages
+          path: feed
+
+      - name: Publish the update to the appcast
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          cp "target/dist/${VERSION}/appcast.xml" feed/appcast.xml
+
+          # 版が入っていない appcast を配ると、だれも更新できないまま気付けないので確かめる
+          grep -q "<sparkle:version>${VERSION}</sparkle:version>" feed/appcast.xml \
+            || { echo "appcast に ${VERSION} が入っていません" >&2; exit 1; }
+          xmllint --noout feed/appcast.xml
+
+          cd feed
+          git add appcast.xml
+          if git diff --cached --quiet; then
+            echo "appcast にはすでに ${VERSION} が入っています"
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -m "atme ${VERSION}"
+          git push
+
+      # トークンは、tap だけに書き込める fine-grained token
+      - name: Check out the Homebrew tap
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: dominion525/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Update the Homebrew cask
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          CASK: tap/Casks/atme.rb
+        run: |
+          set -euo pipefail
+          sha="$(shasum -a 256 "target/dist/${VERSION}/atme-${VERSION}.zip" | awk '{ print $1 }')"
+
+          # リリースのたびに変わる 2 行だけを書き換える。ほかは tap の側で持つ
+          sed -i '' "s|^  version \".*\"|  version \"${VERSION}\"|" "${CASK}"
+          sed -i '' "s|^  sha256 \".*\"|  sha256 \"${sha}\"|" "${CASK}"
+
+          # sed が何にも当たらないと、古いまま失敗せずに終わるので確かめる
+          grep -qx "  version \"${VERSION}\"" "${CASK}" || { echo "${CASK} の version を書き換えられませんでした" >&2; exit 1; }
+          grep -qx "  sha256 \"${sha}\"" "${CASK}" || { echo "${CASK} の sha256 を書き換えられませんでした" >&2; exit 1; }
+          brew style "${CASK}"
+
+          cd tap
+          if git diff --quiet; then
+            echo "cask はすでに ${VERSION} です"
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -am "atme ${VERSION}"
+          git push
