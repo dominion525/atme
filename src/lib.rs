@@ -1,0 +1,21 @@
+//! atme の処理。実行ファイル（main.rs）と、tests/ のテストの両方から使う
+pub mod app;
+pub mod config;
+pub mod controller;
+pub mod credentials;
+pub mod dismiss;
+pub mod display;
+pub mod env;
+pub mod fetch;
+pub mod l10n;
+pub mod list;
+pub mod login;
+pub mod manifest;
+pub mod menu;
+pub mod notify;
+pub mod read;
+pub mod scheduler;
+pub mod setup;
+pub mod slack;
+pub mod state;
+pub mod ui;

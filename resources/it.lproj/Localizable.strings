@@ -1,0 +1,226 @@
+/* キーは英語の文言そのもの（src/l10n.rs）。訳が無いときは英語のまま出る */
+
+/* メニュー：アプリを終了する */
+"Quit" = "Esci";
+
+/* メニュー：Sparkle で新しい版を確かめる */
+"Check for Updates…" = "Controlla aggiornamenti…";
+
+/* メニュー：キャッシュのファイルが無いとき */
+"No cache" = "Nessuna cache";
+
+/* メニュー：1 度も取得に成功していないとき */
+"Not fetched yet" = "Non ancora recuperato";
+
+/* メニュー：最後に取得できた時刻。%@ は「10/28 19:05」の形 */
+"Fetched %@" = "Recuperato: %@";
+
+/* メニュー：取得全体の失敗。%@ はエラーの内容 */
+"Fetch failed: %@" = "Recupero non riuscito: %@";
+
+/* メニュー：ワークスペースごとの取得の失敗。%1$@ はワークスペース名、%2$@ はエラーの内容 */
+"Fetch failed: %1$@ (%2$@)" = "Recupero non riuscito: %1$@ (%2$@)";
+
+/* メニュー：ログイン時の起動の切り替えの失敗。%@ は macOS のエラーの説明 */
+"Couldn't change Open at Login (%@)" = "Impossibile modificare “Apri al login” (%@)";
+
+/* メニュー：ワークスペースに未読が無いとき */
+"None" = "Nessuno";
+
+/* メニュー：一覧をすべて既読として外す */
+"Mark All as Read" = "Segna tutto come letto";
+
+/* メニュー：すぐに取得する */
+"Fetch Now" = "Recupera ora";
+
+/* メニュー：前回の取得から間が無く、まだ押せないとき。%@ は残りの秒数 */
+"Fetch Now (in %@s)" = "Recupera ora (tra %@ s)";
+
+/* メニュー：取得の順番を待っているとき */
+"Waiting to Fetch" = "In attesa del recupero";
+
+/* メニュー：取得しているとき */
+"Fetching…" = "Recupero in corso…";
+
+/* メニュー：ログイン時に atme を起動する */
+"Open at Login" = "Apri al login";
+
+/* メニュー：ログイン時の起動に、システム設定での承認が要るとき */
+"Open at Login (needs approval in System Settings)" = "Apri al login (richiede l’approvazione in Impostazioni di Sistema)";
+
+/* 通知：個別に出さなかった残りの件数。%@ は件数 */
+"And %@ more" = "E altri %@";
+
+/* メニューと通知：グループ DM の場所の名前 */
+"Group DM" = "Messaggio diretto di gruppo";
+
+/* メニューと通知：本文が空のメッセージ */
+"(no text)" = "(nessun testo)";
+
+/* ファイルを読めなかった。%@ はファイルのパス */
+"Couldn't read %@" = "Impossibile leggere %@";
+
+/* 設定や状態のファイルの中身が読み取れない。%@ はファイルのパス */
+"The contents of %@ are invalid" = "Il contenuto di %@ non è valido";
+
+/* 設定ファイルで同じ name が 2 回ある。%@ は name */
+"Workspace name %@ is duplicated" = "Il nome del workspace %@ è duplicato";
+
+/* 環境変数 HOME が無い */
+"HOME is not set" = "HOME non è impostato";
+
+/* Keychain に token が無いなど。%3$@ は security コマンドの出力 */
+"Couldn't read service=%1$@ account=%2$@ from the Keychain: %3$@" = "Impossibile leggere service=%1$@ account=%2$@ dal portachiavi: %3$@";
+
+/* Keychain の値が文字列として読めない */
+"The value of account=%@ in the Keychain isn't UTF-8" = "Il valore di account=%@ nel portachiavi non è UTF-8";
+
+/* ログ：チャンネルの既読の取得に失敗。%1$@ はチャンネル ID */
+"Couldn't read the read state of %1$@: %2$@" = "Impossibile leggere lo stato di lettura di %1$@: %2$@";
+
+/* ログ：スレッドの既読の取得に失敗。%1$@ はチャンネル ID、%2$@ はスレッドの ts */
+"Couldn't read the read state of thread %2$@ in %1$@: %3$@" = "Impossibile leggere lo stato di lettura del thread %2$@ in %1$@: %3$@";
+
+/* HTTP の準備に失敗 */
+"Couldn't create the HTTP client" = "Impossibile creare il client HTTP";
+
+/* Slack の応答にスレッドの親が無い */
+"conversations.replies didn't return the thread parent" = "conversations.replies non ha restituito il messaggio principale del thread";
+
+/* Slack の API に接続できない。%@ は API の名前 */
+"Couldn't call %@" = "Impossibile chiamare %@";
+
+/* Slack の API が HTTP のエラーを返した */
+"%1$@ returned HTTP %2$@" = "%1$@ ha restituito HTTP %2$@";
+
+/* Slack の応答を受け取れない */
+"Couldn't read the response of %@" = "Impossibile leggere la risposta di %@";
+
+/* Slack の応答の形が想定と違う */
+"Couldn't parse the response of %@" = "Impossibile interpretare la risposta di %@";
+
+/* Slack の API がエラーを返した。%2$@ は Slack のエラーコード（訳さない） */
+"%1$@ failed: %2$@" = "%1$@ non riuscito: %2$@";
+
+/* 状態のファイルの保存先が無い */
+"No directory to save to" = "Nessuna cartella in cui salvare";
+
+/* ディレクトリを作れない */
+"Couldn't create %@" = "Impossibile creare %@";
+
+/* ファイルの権限を変えられない */
+"Couldn't set the permissions of %@" = "Impossibile impostare i permessi di %@";
+
+/* ファイルを開けない */
+"Couldn't open %@" = "Impossibile aprire %@";
+
+/* ファイルに書けない */
+"Couldn't write to %@" = "Impossibile scrivere in %@";
+
+/* 書いたファイルで置き換えられない */
+"Couldn't replace %@" = "Impossibile sostituire %@";
+
+/* CLI：atme fetch で失敗があった */
+"Some workspaces failed to fetch" = "Il recupero non è riuscito per alcuni workspace";
+
+/* ログ：users.info の失敗。%1$@ はワークスペース、%2$@ はユーザー ID */
+"%1$@: couldn't look up the display name of %2$@: %3$@" = "%1$@: impossibile trovare il nome visualizzato di %2$@: %3$@";
+
+/* ログ：自動アップデートの準備に失敗 */
+"Couldn't load Sparkle.framework" = "Impossibile caricare Sparkle.framework";
+
+/* .app の外から引数なしで起動した */
+"Can't stay in the menu bar because atme was run outside atme.app" = "Impossibile restare nella barra dei menu perché atme è stato avviato al di fuori di atme.app";
+
+/* 内部のエラー */
+"Not running on the main thread" = "Non in esecuzione sul thread principale";
+
+/* ログ：通知の許可の問い合わせに失敗 */
+"Couldn't ask for notification permission: %@" = "Impossibile richiedere il permesso per le notifiche: %@";
+
+/* ログ：起動時に通知が許可されなかった */
+"Notifications aren't allowed. Allow atme under Notifications in System Settings" = "Le notifiche non sono consentite. Consenti atme in Notifiche, nelle Impostazioni di Sistema";
+
+/* ログ：.app の外の CLI では通知しない */
+"Not sending notifications because atme was run outside atme.app" = "Nessuna notifica inviata perché atme è stato avviato al di fuori di atme.app";
+
+/* ログ：通知が許可されていない */
+"Notifications aren't allowed. Open atme.app to allow them" = "Le notifiche non sono consentite. Apri atme.app per consentirle";
+
+/* ログ：通知の設定を読めない */
+"Not sending notifications because the notification settings couldn't be read" = "Nessuna notifica inviata perché non è stato possibile leggere le impostazioni delle notifiche";
+
+/* ログ：通知の登録に失敗 */
+"Couldn't send a notification: %@" = "Impossibile inviare una notifica: %@";
+
+/* ログ：通知の登録が返ってこない */
+"No response to the notification request" = "Nessuna risposta alla richiesta di notifica";
+
+/* CLI：atme list でキャッシュが無い */
+"No cache. Run atme fetch" = "Nessuna cache. Esegui atme fetch";
+
+/* CLI：atme fetch のワークスペースごとの結果。%1$@ はワークスペース名、%2$@ は一覧の件数、%3$@ は新着の件数 */
+"%1$@: %2$@ total, %3$@ new" = "%1$@: %2$@ in totale, %3$@ nuovi";
+
+/* token を Keychain に保存できない */
+"Couldn't save service=%1$@ account=%2$@ to the Keychain" = "Impossibile salvare service=%1$@ account=%2$@ nel portachiavi";
+
+/* token を Keychain から消せない */
+"Couldn't delete service=%1$@ account=%2$@ from the Keychain" = "Impossibile eliminare service=%1$@ account=%2$@ dal portachiavi";
+
+/* 同じワークスペースを 2 回足そうとした。%@ はワークスペース名 */
+"%@ has already been added" = "%@ è già stato aggiunto";
+
+/* 入れた値が user token ではない */
+"Paste a User OAuth Token that starts with xoxp-" = "Incolla un User OAuth Token che inizia con xoxp-";
+
+/* Slack の応答にワークスペースの URL が無い */
+"auth.test didn't return the workspace URL" = "auth.test non ha restituito l’URL del workspace";
+
+/* メニュー：ワークスペースの追加・削除のウインドウを開く */
+"Workspaces…" = "Workspace…";
+
+/* ウインドウの題 */
+"Workspaces" = "Workspace";
+
+/* ウインドウ：ワークスペースを外すボタン */
+"Remove" = "Rimuovi";
+
+/* ウインドウ：token を確かめて足すボタン */
+"Add" = "Aggiungi";
+
+/* ウインドウ：token を確かめているとき */
+"Checking…" = "Verifica in corso…";
+
+/* ウインドウ：追加できたとき。%@ はワークスペース名 */
+"Added %@" = "%@ aggiunto";
+
+/* メニュー：ワークスペースが 1 つも無いとき。「ワークスペース…」はメニューの項目名に合わせる */
+"No workspaces. Add one from Workspaces…" = "Nessun workspace. Aggiungine uno da “Workspace…”";
+
+/* 設定ファイルの workspace が [[workspace]] の表になっていない */
+"workspace must be written as [[workspace]]" = "workspace deve essere scritto come [[workspace]]";
+
+/* 削除の確認の題。%@ はワークスペース名 */
+"Remove %@?" = "Rimuovere %@?";
+
+/* 削除の確認の説明 */
+"The token is also deleted from the Keychain. You can add the workspace again by pasting the same token." = "Il token viene eliminato anche dal portachiavi. Puoi aggiungere di nuovo il workspace incollando lo stesso token.";
+
+/* 削除の確認：何もしないボタン */
+"Cancel" = "Annulla";
+
+/* ウインドウ：manifest を入れて Slack App を作る画面をブラウザで開くボタン */
+"Create Slack App…" = "Crea Slack App…";
+
+/* ウインドウ：追加済みのワークスペースが 1 つも無いとき */
+"No workspaces" = "Nessun workspace";
+
+/* ウインドウ：手順 1。右に「Slack App を作る…」のボタンが並ぶ */
+"1. Create a Slack App for each workspace" = "1. Crea una Slack App per ogni workspace";
+
+/* ウインドウ：手順 2（Install to Workspace は Slack の画面の表記のまま） */
+"2. Click Install to Workspace and copy the token" = "2. Fai clic su Install to Workspace e copia il token";
+
+/* ウインドウ：手順 3。下に token の入力欄と「追加」が並ぶ */
+"3. Paste the copied token and add it" = "3. Incolla il token copiato e aggiungilo";

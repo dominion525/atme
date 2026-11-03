@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    # macos-15 は arm64 のイメージ。atme は Apple silicon の macOS だけを相手にする
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      # clippy の指摘は版ごとに増えるので、手元で使っている版に固定する。上げるときは手元とそろえる
+      RUSTUP_TOOLCHAIN: "1.93.0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust
+        run: rustup toolchain install "${RUSTUP_TOOLCHAIN}" --profile minimal --component rustfmt,clippy
+
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      # tests/appkit.rs は AppKit の部品を作るので、メインスレッドで動く自前の main で回る
+      - name: Test
+        run: cargo test --locked
