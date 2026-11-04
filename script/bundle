@@ -26,6 +26,8 @@ fi
 
 if [ ! -d "$sparkle_dir/Sparkle.framework" ]; then
   archive="$root/target/Sparkle-$sparkle_version.tar.xz"
+  # 真新しい作業場所では、cargo build より前のこの時点で target がまだ無い
+  mkdir -p "$root/target"
   curl -fL -o "$archive" "https://github.com/sparkle-project/Sparkle/releases/download/$sparkle_version/Sparkle-$sparkle_version.tar.xz"
   echo "$sparkle_sha256  $archive" | shasum -a 256 -c -
   rm -rf "$sparkle_dir"
