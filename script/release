@@ -47,8 +47,20 @@ if [ "$status" != "Accepted" ]; then
   echo "公証が通りませんでした（status: ${status:-不明}）: $result" >&2
   exit 1
 fi
-xcrun stapler staple "$app"
-xcrun stapler validate "$app"
+# staple は Apple のサーバーから公証の結果を取ってくる。通信が一時的に切れて Error 68 になることがあるので、何回か試し直す
+stapled=
+for attempt in 1 2 3 4 5; do
+  if xcrun stapler staple "$app" && xcrun stapler validate "$app"; then
+    stapled=1
+    break
+  fi
+  echo "staple が通りませんでした（$attempt 回目）。30 秒待って試し直します" >&2
+  sleep 30
+done
+if [ -z "$stapled" ]; then
+  echo "staple が 5 回とも通りませんでした" >&2
+  exit 1
+fi
 spctl -a -vvv -t exec "$app"
 
 echo "==> package"
