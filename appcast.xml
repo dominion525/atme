@@ -3,6 +3,15 @@
     <channel>
         <title>atme</title>
         <item>
+            <title>0.1.1</title>
+            <pubDate>Wed, 04 Nov 2026 06:21:06 +0000</pubDate>
+            <sparkle:version>0.1.1</sparkle:version>
+            <sparkle:shortVersionString>0.1.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/dominion525/atme/releases/download/v0.1.1/atme-0.1.1.zip" length="4859106" type="application/octet-stream" sparkle:edSignature="VOdX/hifjU279BlJzx/8vqFWV7beJ+OsbicMmVz+c914Fv8MtKfzNjfo7LtSfYWXb/y7hcrDBZFkFZsN+hNzDg=="/>
+        </item>
+        <item>
             <title>0.1.0</title>
             <pubDate>Wed, 04 Nov 2026 01:43:11 +0000</pubDate>
             <sparkle:version>0.1.0</sparkle:version>
